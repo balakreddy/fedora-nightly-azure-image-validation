@@ -9,7 +9,7 @@ All dependencies required to run LISA and the associated tooling are installed u
 
 ## Pre-requisites:
 
-1. Clone [LISA](https://github.com/microsoft/lisa) framework on the latest fedora.
+1. Clone [LISA](https://github.com/microsoft/lisa) framework on the latest fedora and install it.
 2. Use install_dependencies.sh to install all the dependent pacakges needed.
 3. Login to azure using azure-cli
    `az login `
