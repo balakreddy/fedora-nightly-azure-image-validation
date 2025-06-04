@@ -4,10 +4,13 @@ import subprocess
 import os
 
 class LisaRunner:
+    """ Class to run LISA tests asynchronously"""
+
     def __init__(self, logger=None):
         self.logger = logger or logging.getLogger(__name__)
 
     async def trigger_lisa(self, region, community_gallery_image, subscription, private_key):
+        """ Trigger LISA tier 0 tests with the provided parameters."""
         try:
             variables = [
                 f"region:{region}",
@@ -24,18 +27,18 @@ class LisaRunner:
             for var in variables:
                 command.extend(["-v", var])
 
-            self.logger.info(f"Running LISA test with command: {' '.join(command)}")
+            self.logger.info("Starting LISA test with command: {' '.join(command)}")
             process = await asyncio.create_subprocess_exec(
                 *command,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE
             )
             stdout, stderr = await process.communicate()
-            self.logger.info(f"LISA test completed with output:\n{stdout.decode()}")
+            self.logger.info("LISA test completed with output:\n{stdout.decode()}")
             if stderr:
-                self.logger.error(f"LISA test encountered errors:\n{stderr.decode()}")
+                self.logger.error("LISA test encountered errors:\n{stderr.decode()}")
         except Exception as e:
-            self.logger.error(f"An error occurred: {e}")
+            self.logger.error("An error occurred: {e}")
 
 if __name__ == "__main__":
     log_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'lisa_runner.log')
@@ -46,7 +49,7 @@ if __name__ == "__main__":
     file_handler.setFormatter(formatter)
     if not logger.hasHandlers():
         logger.addHandler(file_handler)
-    runner = LisaRunner(logger)    
+    runner = LisaRunner(logger)
     region = ""
     community_gallery_image = ""
     subscription = ""
