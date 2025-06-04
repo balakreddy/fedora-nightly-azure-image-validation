@@ -14,3 +14,17 @@ All dependencies required to run LISA and the associated tooling are installed u
 3. Login to azure using azure-cli
    `az login `
 
+## Workflow overview
+
+#### Consume Fedora Messaging
+- Uses fedora-messaging API to listen for new Fedora nightly image notifications.
+- Triggers test execution once a valid message is received.
+
+#### Trigger LISA tests
+- Initializes and executes LISA using:
+   - Image reference from the received message
+   - Azure subscription details
+- Current plan is to run only Tier 0 test cases
+
+#### Results 
+- Share the output of lisa execution from html file as is.
