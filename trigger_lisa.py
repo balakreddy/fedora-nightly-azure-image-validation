@@ -1,8 +1,10 @@
+"""Module to trigger LISA tests asynchronously."""
+
 import asyncio
 import logging
 import subprocess
-import os
 
+# pylint: disable=too-few-public-methods
 class LisaRunner:
     """ Class to run LISA tests asynchronously"""
 
@@ -27,31 +29,15 @@ class LisaRunner:
             for var in variables:
                 command.extend(["-v", var])
 
-            self.logger.info("Starting LISA test with command: {' '.join(command)}")
+            self.logger.info("Starting LISA test with command: %s", ' '.join(command))
             process = await asyncio.create_subprocess_exec(
                 *command,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE
             )
             stdout, stderr = await process.communicate()
-            self.logger.info("LISA test completed with output:\n{stdout.decode()}")
+            self.logger.info("LISA test completed with output: %s ", stdout.decode())
             if stderr:
-                self.logger.error("LISA test encountered errors:\n{stderr.decode()}")
-        except Exception as e:
-            self.logger.error("An error occurred: {e}")
-
-if __name__ == "__main__":
-    log_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'lisa_runner.log')
-    logger = logging.getLogger("LisaRunnerLogger")
-    logger.setLevel(logging.INFO)
-    file_handler = logging.FileHandler(log_file)
-    formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
-    file_handler.setFormatter(formatter)
-    if not logger.hasHandlers():
-        logger.addHandler(file_handler)
-    runner = LisaRunner(logger)
-    region = ""
-    community_gallery_image = ""
-    subscription = ""
-    private_key = ""
-    asyncio.run(runner.trigger_lisa(region, community_gallery_image, subscription, private_key))
+                self.logger.error("LISA test encountered errors: %s ", stderr.decode())
+        except Exception as e:  # pylint: disable=broad-except
+            self.logger.error("An error occurred while running the tests: %s", str(e))
