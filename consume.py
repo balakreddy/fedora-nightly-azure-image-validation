@@ -1,5 +1,6 @@
 """Consumer for AzurePublishedV1 messages and LISA trigger."""
 
+import asyncio
 import logging
 import os
 
@@ -24,7 +25,8 @@ formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
 file_handler.setFormatter(formatter)
 
 # Add handlers
-logger.addHandler(file_handler)
+if not logger.hasHandlers():
+    logger.addHandler(file_handler)
 
 logger.info("Logger initialized for AzurePublishedV1 consumer.")
 
@@ -68,9 +70,12 @@ def azure_published_callback(message):
         logger.info("Community Gallery Image ID: %s", community_gallery_image)
 
         try:
-            LisaRunner.trigger_lisa(REGION, community_gallery_image, SUBSCRIPTION_ID, PRIVATE_KEY, logger=logger)
+            runner = LisaRunner(logger=logger)
+            asyncio.run(runner.trigger_lisa(
+                region=REGION, community_gallery_image=community_gallery_image,
+                subscription=SUBSCRIPTION_ID, private_key=PRIVATE_KEY))
             logger.info("LISA trigger executed successfully.")
-        except Exception as e:
+        except Exception as e:  # pylint: disable=broad-except
             logger.exception("Failed to trigger LISA: %s", str(e))
     else:
         logger.warning("Ignoring message %s with unrecognized topic: %s", message, message.topic)
@@ -86,8 +91,5 @@ if __name__ == "__main__":
     }]
     logger.info("Bindings configured: %s", bindings)
 
-    try:
-        consume(azure_published_callback, bindings=bindings)
-        logger.info("Consumer started successfully.")
-    except Exception as e:
-        logger.exception("Error starting consumer: %s", str(e))
+    consume(azure_published_callback, bindings=bindings)
+    logger.info("Consumer started successfully.")
