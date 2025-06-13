@@ -30,45 +30,37 @@ if not logger.hasHandlers():
 
 logger.info("Logger initialized for AzurePublishedV1 consumer.")
 
+def has_matching_keys(azurepublished_properties, message):
+    """Check if the received message properties match the AzurePublishedV1 schema."""
+
+    logger.info("Comparing properties: %s with message"
+                ": %s", azurepublished_properties, message)
+    try:
+        azurepublished_properties = set(azurepublished_properties.body_schema['properties'].keys())
+        message_properties = set(message.body.keys())
+        return azurepublished_properties == message_properties
+    except Exception as e: # pylint: disable=broad-except
+        logger.error("Invalid properties of the message received %s", str(e))
+        return False
+
+
+def get_community_gallery_image(message):
+    """Extract community gallery image from the message."""
+
+    logger.info("Extracting community gallery image from the message: %s", message.body)
+    try:
+        return message.body.get('image_resource_id', None)
+    except AttributeError as e:
+        logger.error("Failed to extract community gallery image from the message: %s", str(e))
+        return None
+
 
 def azure_published_callback(message):
     """Handle Azure published messages"""
-    logger.info("Received message on topic: %s", message.topic)
+    logger.info("Received message on topic: %s", message.body)
 
-    if message.topic == AzurePublishedV1.topic:
-        body = message.body
-        headers = message.headers
-
-        logger.debug("Message body: %s", body)
-        logger.debug("Message headers: %s", headers)
-
-        required_headers = [
-            "fedora_messaging_schema",
-            "fedora_messaging_schema_package",
-            "sent-at",
-        ]
-        for header in required_headers:
-            if header not in headers:
-                logger.error("Missing required header: %s", header)
-                raise KeyError(f"Missing required header: {header}")
-
-        required_body_fields = [
-            "architecture",
-            "compose_id",
-            "image_definition_name",
-            "image_resource_id",
-            "image_version_name",
-            "release",
-        ]
-        for field in required_body_fields:
-            if field not in body:
-                logger.error("Missing required body field: %s", field)
-                raise KeyError(f"Missing required body field: {field}")
-
-        community_gallery_image = body["image_resource_id"]
-        logger.info("Image architecture: %s", body["architecture"])
-        logger.info("Community Gallery Image ID: %s", community_gallery_image)
-
+    if has_matching_keys(AzurePublishedV1, message):
+        community_gallery_image = get_community_gallery_image(message)
         try:
             runner = LisaRunner(logger=logger)
             asyncio.run(runner.trigger_lisa(
@@ -78,7 +70,7 @@ def azure_published_callback(message):
         except Exception as e:  # pylint: disable=broad-except
             logger.exception("Failed to trigger LISA: %s", str(e))
     else:
-        logger.warning("Ignoring message %s with unrecognized topic: %s", message, message.topic)
+        logger.warning("Message properties do not match AzurePublishedV1 schema. Skipping message.")
 
 
 if __name__ == "__main__":
