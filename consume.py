@@ -42,6 +42,20 @@ def get_community_gallery_image(message):
             return None
 
         image_definition_name = message.body.get('image_definition_name')
+        # Run tests only for fedora rawhide, 41 and 42,
+        # include your Fedora versions below
+        fedora_versions = [
+            "Fedora-Cloud-Rawhide-x64",
+            "Fedora-Cloud-41-x64",
+            "Fedora-Cloud-41-Arm64",
+            "Fedora-Cloud-Rawhide-Arm64",
+            "Fedora-Cloud-42-x64",
+            "Fedora-Cloud-42-Arm64",
+        ]
+        if image_definition_name not in fedora_versions:
+            logger.info("image_definition_name '%s' not in supported Fedora"
+                        " versions, skipping.", image_definition_name)
+            return None
         image_version_name = message.body.get('image_version_name')
         image_resource_id = message.body.get('image_resource_id')
 
@@ -83,7 +97,7 @@ def azure_published_callback(message):
 
     try:
         if not community_gallery_image:
-            logger.error("No community gallery image found in the message.")
+            logger.error("Unsupported or No community gallery image found in the message.")
             return
         runner = LisaRunner(logger=logger)
         asyncio.run(runner.trigger_lisa(
