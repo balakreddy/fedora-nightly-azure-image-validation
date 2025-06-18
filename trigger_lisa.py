@@ -23,7 +23,7 @@ class LisaRunner:
             command = [
                 "lisa",
                 "-r", "microsoft/runbook/azure.yml",
-                "-v", "tier:0"
+                "-v", "tier:1"
                 # "-v", "case:verify_dhcp_file_configuration"
             ]
             for var in variables:
