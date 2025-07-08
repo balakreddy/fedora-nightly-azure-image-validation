@@ -12,7 +12,24 @@ class LisaRunner:
         self.logger = logger or logging.getLogger(__name__)
 
     async def trigger_lisa(self, region, community_gallery_image, subscription, private_key):
-        """ Trigger LISA tier 0 tests with the provided parameters."""
+        """ Trigger LISA tier 1 tests with the provided parameters.
+
+        Args:
+            region (str): The Azure region to run the tests in.
+            community_gallery_image (str): The community gallery image to use for testing.
+            subscription (str): The Azure subscription ID.
+            private_key (str): The path to the private key file for authentication.
+            
+        Returns:
+            bool: True if the LISA test completed successfully (return code 0), 
+                  False if the test failed, had errors, or if required parameters are missing.
+        """
+        # Validate the input parameters
+        if not all([region, community_gallery_image, subscription, private_key]):
+            self.logger.error("Missing required parameters: region, "
+                              "community_gallery_image, subscription, or private_key.")
+            return False
+
         try:
             variables = [
                 f"region:{region}",
@@ -22,9 +39,9 @@ class LisaRunner:
             ]
             command = [
                 "lisa",
-                "-r", "microsoft/runbook/azure.yml",
-                "-v", "tier:1"
-                # "-v", "case:verify_dhcp_file_configuration"
+                "-r", "microsoft/runbook/azure_fedora.yml",
+                "-v", "tier:1",
+                "-v", "test_case_name:verify_dhcp_file_configuration"
             ]
             for var in variables:
                 command.extend(["-v", var])
@@ -36,8 +53,19 @@ class LisaRunner:
                 stderr=subprocess.PIPE
             )
             stdout, stderr = await process.communicate()
-            self.logger.info("LISA test completed with output: %s ", stdout.decode())
+
+            if process.returncode == 0:
+                self.logger.info("LISA test completed successfully "
+                                 "with output %s.", stdout.decode())
+                if stderr:
+                    self.logger.info("LISA test has warnings: %s", stderr.decode())
+                return True
+            self.logger.error("Triggering LISA tests failed %d", process.returncode)
+            if stdout:
+                self.logger.error("Standard Output: %s", stdout.decode())
             if stderr:
-                self.logger.error("LISA test encountered errors: %s ", stderr.decode())
+                self.logger.error("Standard Error: %s", stderr.decode())
+            return False
         except Exception as e:  # pylint: disable=broad-except
             self.logger.error("An error occurred while running the tests: %s", str(e))
+            return False
