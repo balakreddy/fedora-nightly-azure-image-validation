@@ -59,7 +59,7 @@ class LisaRunner:
 
             if process.returncode == 0:
                 self.logger.info(
-                    "LISA test completed successfully " "with output %s.",
+                    "LISA test completed successfully with output %s.",
                     stdout.decode(),
                 )
                 if stderr:

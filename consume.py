@@ -32,7 +32,7 @@ class AzurePublishedConsumer:
         self.logger = logging.getLogger(__name__)
         self.logger.setLevel(logging.INFO)
 
-        # Remove any existing handlesr to avoid duplicate logs
+        # Remove any existing handlers to avoid duplicate logs
         for handler in self.logger.handlers[:]:
             self.logger.removeHandler(handler)
 
