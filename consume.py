@@ -62,6 +62,29 @@ class AzurePublishedConsumer:
         self.logger.info("Received message: %s", message)
         self.azure_published_callback(message)
 
+    def _get_image_definition_name(self, message):
+        """ Get image definition name from the message body.
+
+        Args:
+            message (AzurePublishedV1): The message containing image details.
+
+        Returns:
+            str: The image definition name if found, else None.
+            Eg: "Fedora-Cloud-Rawhide-x64", "Fedora-Cloud-41-x64", etc.
+        """
+        try:
+            image_definition_name = message.body.get("image_definition_name")
+            if not isinstance(image_definition_name, str):
+                self.logger.error(
+                    "image_definition_name is not a string: %s", image_definition_name
+                )
+                return None
+            self.logger.info("Extracted image_definition_name: %s", image_definition_name)
+            return image_definition_name
+        except AttributeError:
+            self.logger.error("Message body does not have 'image_definition_name' field.")
+            return None
+
     def get_community_gallery_image(self, message):
         """Extract community gallery image from the messages."""
         self.logger.info(
@@ -73,9 +96,9 @@ class AzurePublishedConsumer:
                 self.logger.error("Message body is not a dictionary.")
                 return None
 
-            image_definition_name = message.body.get("image_definition_name")
+            image_definition_name = self._get_image_definition_name(message)
             # Run tests only for fedora rawhide, 41 and 42,
-            # include your Fedora versions below
+            #  include your Fedora versions in SUPPORTED_FEDORA_VERSIONS
             if image_definition_name not in self.SUPPORTED_FEDORA_VERSIONS:
                 self.logger.info(
                     "image_definition_name '%s' not in supported Fedora"
@@ -135,6 +158,8 @@ class AzurePublishedConsumer:
                     "Unsupported or No community gallery image found in the message."
                 )
                 return
+            log_path = self._generate_test_log_path(self._get_image_definition_name(message))
+            self.logger.info("Test log path generated: %s", log_path)
             runner = LisaRunner(logger=self.logger)
             asyncio.run(
                 runner.trigger_lisa(
