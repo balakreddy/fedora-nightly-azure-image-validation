@@ -12,7 +12,14 @@ async def test_trigger_lisa_success():
         mock_process = MagicMock()
         mock_process.communicate = MagicMock(return_value=(b"success", b""))
         mock_subproc_exec.return_value = mock_process
-        await runner.trigger_lisa("westus2", "image", "sub", "key")
+
+        config_params = {
+            "subscription": "sub",
+            "private_key": "key",
+            "log_path": "/tmp/test",
+            "run_name": "test-run"
+        }
+        await runner.trigger_lisa("westus2", "image", config_params)
         mock_subproc_exec.assert_called()
         mock_process.communicate.assert_called()
 
@@ -22,5 +29,11 @@ async def test_trigger_lisa_error_logs():
     runner = LisaRunner()
     with patch("asyncio.create_subprocess_exec", side_effect=Exception("fail")):
         with patch.object(runner.logger, "error") as mock_logger_error:
-            await runner.trigger_lisa("eastus", "image", "sub", "key")
+            config_params = {
+                "subscription": "sub",
+                "private_key": "key",
+                "log_path": "/tmp/test",
+                "run_name": "test-run"
+            }
+            await runner.trigger_lisa("eastus", "image", config_params)
             mock_logger_error.assert_called()
