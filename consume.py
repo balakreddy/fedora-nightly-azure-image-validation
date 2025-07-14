@@ -3,6 +3,7 @@
 import asyncio
 import logging
 import os
+from datetime import datetime
 
 from fedora_image_uploader_messages.publish import AzurePublishedV1
 from fedora_messaging.api import consume
@@ -12,6 +13,7 @@ from trigger_lisa import LisaRunner
 REGION = "westus3"  # Default region in which the LISA tests will be run
 PRIVATE_KEY = ""  # Path to the private key file for Azure authentication
 SUBSCRIPTION_ID = ""  # Subscription ID for Azure
+LOG_PATH = "/home/lisa_results" # Default path for LISA test logs
 
 
 class AzurePublishedConsumer:
@@ -84,6 +86,49 @@ class AzurePublishedConsumer:
         except AttributeError:
             self.logger.error("Message body does not have 'image_definition_name' field.")
             return None
+
+    def _generate_test_log_path(self, image_definition_name):
+        """
+        Generate test log path and run time name for the lisa tests.
+
+        Args:
+            image_definition_name (str): The name of the image definition.
+
+        Returns:
+            str: The generated log path.
+            str: The run time name for the LISA tests.
+        """
+
+        os.makedirs(LOG_PATH, exist_ok=True)
+        self.logger.info("Ensure log path exists: %s", LOG_PATH)
+
+        # Generate log path and run name based on image name
+        #  and date to store the results of the LISA tests
+        try:
+            log_path = os.path.join(LOG_PATH, image_definition_name)
+            os.makedirs(log_path, exist_ok=True)
+            self.logger.info("Generated log path: %s", log_path)
+        except Exception as e: # pylint: disable=broad-except
+            self.logger.error("Failed to generate log path: %s", str(e))
+            log_path = None
+
+        # Generate run name in the format MonthDay-Year-Time
+        # Example: "July25-2023-14:30"
+        try:
+            current_date = datetime.now()
+            month_day = current_date.strftime("%B%d")
+            year = current_date.strftime("%Y")
+            time_str = current_date.strftime("%H:%M")
+            run_name = f"{month_day}-{year}-{time_str}"
+            self.logger.info("Generated run name: %s", run_name)
+        except Exception as e: # pylint: disable=broad-except
+            self.logger.error("Failed to generate run name: %s", str(e))
+            # Fallback to a default run name
+            run_name = datetime.now().strftime("%Y%m%d-%H%M%S")
+            self.logger.info("Using fallback run name: %s", run_name)
+
+        return log_path, run_name
+
 
     def get_community_gallery_image(self, message):
         """Extract community gallery image from the messages."""
@@ -158,7 +203,8 @@ class AzurePublishedConsumer:
                     "Unsupported or No community gallery image found in the message."
                 )
                 return
-            log_path = self._generate_test_log_path(self._get_image_definition_name(message))
+            log_path, run_name = self._generate_test_log_path(
+                self._get_image_definition_name(message))
             self.logger.info("Test log path generated: %s", log_path)
             runner = LisaRunner(logger=self.logger)
             asyncio.run(
@@ -167,6 +213,8 @@ class AzurePublishedConsumer:
                     community_gallery_image=community_gallery_image,
                     subscription=SUBSCRIPTION_ID,
                     private_key=PRIVATE_KEY,
+                    log_path=log_path,
+                    run_name=run_name,
                 )
             )
             self.logger.info("LISA trigger executed successfully.")

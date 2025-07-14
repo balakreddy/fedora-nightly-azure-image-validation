@@ -13,7 +13,8 @@ class LisaRunner:
         self.logger = logger or logging.getLogger(__name__)
 
     async def trigger_lisa(
-        self, region, community_gallery_image, subscription, private_key
+        self, region, community_gallery_image, subscription, private_key,
+        log_path, run_name
     ):
         """Trigger LISA tier 1 tests with the provided parameters.
 
@@ -22,6 +23,8 @@ class LisaRunner:
             community_gallery_image (str): The community gallery image to use for testing.
             subscription (str): The Azure subscription ID.
             private_key (str): The path to the private key file for authentication.
+            log_path (str): The path to the log file for the LISA tests.
+            run_name (str): The name of the test run.
 
         Returns:
             bool: True if the LISA test completed successfully (return code 0),
@@ -50,6 +53,11 @@ class LisaRunner:
             ]
             for var in variables:
                 command.extend(["-v", var])
+
+            command.extend([
+                "-l", log_path,
+                "-i", run_name,
+            ])
 
             self.logger.info("Starting LISA test with command: %s", " ".join(command))
             process = await asyncio.create_subprocess_exec(
