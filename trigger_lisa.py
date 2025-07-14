@@ -13,25 +13,25 @@ class LisaRunner:
         self.logger = logger or logging.getLogger(__name__)
 
     async def trigger_lisa(
-        self, region, community_gallery_image, subscription, private_key,
-        log_path, run_name
-    ):
+        self, region, community_gallery_image, config):
         """Trigger LISA tier 1 tests with the provided parameters.
 
         Args:
             region (str): The Azure region to run the tests in.
             community_gallery_image (str): The community gallery image to use for testing.
-            subscription (str): The Azure subscription ID.
-            private_key (str): The path to the private key file for authentication.
-            log_path (str): The path to the log file for the LISA tests.
-            run_name (str): The name of the test run.
+            config (dict): A dictionary containing the configuration parameters.
+                - subscription (str): The Azure subscription ID.
+                - private_key (str): The path to the private key file for authentication.
+                - log_path (str): The path to the log file for the LISA tests.
+                - run_name (str): The name of the test run.
 
         Returns:
             bool: True if the LISA test completed successfully (return code 0),
                   False if the test failed, had errors, or if required parameters are missing.
         """
         # Validate the input parameters
-        if not all([region, community_gallery_image, subscription, private_key]):
+        if not all([region, community_gallery_image,
+                     config.get("subscription"), config.get("private_key")]):
             self.logger.error(
                 "Missing required parameters: region, "
                 "community_gallery_image, subscription, or private_key."
@@ -42,21 +42,21 @@ class LisaRunner:
             variables = [
                 f"region:{region}",
                 f"community_gallery_image:{community_gallery_image}",
-                f"subscription_id:{subscription}",
-                f"admin_private_key_file:{private_key}",
+                f"subscription_id:{config.get('subscription')}",
+                f"admin_private_key_file:{config.get('private_key')}",
             ]
             command = [
                 "lisa",
                 "-r", "microsoft/runbook/azure_fedora.yml",
                 "-v", "tier:1",
-                # "-v", "test_case_name:verify_dhcp_file_configuration",
+                "-v", "test_case_name:verify_dhcp_file_configuration",
             ]
             for var in variables:
                 command.extend(["-v", var])
 
             command.extend([
-                "-l", log_path,
-                "-i", run_name,
+                "-l", config.get("log_path"),
+                "-i", config.get("run_name"),
             ])
 
             self.logger.info("Starting LISA test with command: %s", " ".join(command))

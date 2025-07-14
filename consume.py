@@ -206,15 +206,18 @@ class AzurePublishedConsumer:
             log_path, run_name = self._generate_test_log_path(
                 self._get_image_definition_name(message))
             self.logger.info("Test log path generated: %s", log_path)
+            config_params = {
+                "subscription": SUBSCRIPTION_ID,
+                "private_key": PRIVATE_KEY,
+                "log_path": log_path,
+                "run_name": run_name,
+            }
             runner = LisaRunner(logger=self.logger)
             asyncio.run(
                 runner.trigger_lisa(
                     region=REGION,
                     community_gallery_image=community_gallery_image,
-                    subscription=SUBSCRIPTION_ID,
-                    private_key=PRIVATE_KEY,
-                    log_path=log_path,
-                    run_name=run_name,
+                    config=config_params
                 )
             )
             self.logger.info("LISA trigger executed successfully.")
