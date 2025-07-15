@@ -1,0 +1,7 @@
+[MESSAGES CONTROL]
+# Disable specific warnings for test files
+disable=redefined-outer-name,line-too-long
+
+[FORMAT]
+# Maximum number of characters on a single line
+max-line-length=120

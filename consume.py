@@ -13,7 +13,8 @@ from trigger_lisa import LisaRunner
 REGION = "westus3"  # Default region in which the LISA tests will be run
 PRIVATE_KEY = ""  # Path to the private key file for Azure authentication
 SUBSCRIPTION_ID = ""  # Subscription ID for Azure
-LOG_PATH = "/home/lisa_results" # Default path for LISA test logs
+CUSTOM_LOG_PATH = True  # Flag to indicate if a custom log path should be used
+CUSTOM_RUN_NAME = True  # Flag to indicate if a custom run name should be generated
 
 
 class AzurePublishedConsumer:
@@ -99,36 +100,41 @@ class AzurePublishedConsumer:
             str: The run time name for the LISA tests.
         """
 
-        os.makedirs(LOG_PATH, exist_ok=True)
-        self.logger.info("Ensure log path exists: %s", LOG_PATH)
+        log_path, run_name = None, None
 
-        # Generate log path and run name based on image name
-        #  and date to store the results of the LISA tests
-        try:
-            log_path = os.path.join(LOG_PATH, image_definition_name)
-            os.makedirs(log_path, exist_ok=True)
-            self.logger.info("Generated log path: %s", log_path)
-        except Exception as e: # pylint: disable=broad-except
-            self.logger.error("Failed to generate log path: %s", str(e))
-            log_path = None
+        # Generate custom log if CUSTOM_LOG_PATH is set to True
+        if CUSTOM_LOG_PATH:
+            try:
+                base_log_path = os.path.expanduser("~/lisa_results")
+                os.makedirs(base_log_path, exist_ok=True)
+                self.logger.info("Base log path created: %s", base_log_path)
 
-        # Generate run name in the format MonthDay-Year-Time
-        # Example: "July25-2023-14:30"
-        try:
-            current_date = datetime.now()
-            month_day = current_date.strftime("%B%d")
-            year = current_date.strftime("%Y")
-            time_str = current_date.strftime("%H:%M")
-            run_name = f"{month_day}-{year}-{time_str}"
-            self.logger.info("Generated run name: %s", run_name)
-        except Exception as e: # pylint: disable=broad-except
-            self.logger.error("Failed to generate run name: %s", str(e))
-            # Fallback to a default run name
-            run_name = datetime.now().strftime("%Y%m%d-%H%M%S")
-            self.logger.info("Using fallback run name: %s", run_name)
+                # Create image-specific log directory
+                log_path = os.path.join(base_log_path, image_definition_name)
+                os.makedirs(log_path, exist_ok=True)
+                self.logger.info("Log path created: %s", log_path)
+            except Exception as e: # pylint: disable=broad-except
+                self.logger.error("Failed to create log path: %s", str(e))
+                log_path = None
+        else:
+            self.logger.info("Using default log path")
+
+        # Generate custom run name if CUSTOM_RUN_NAME is set to True
+        if CUSTOM_RUN_NAME:
+            try:
+                current_date = datetime.now()
+                month_day = current_date.strftime("%B%d")
+                year = current_date.strftime("%Y")
+                time_str = current_date.strftime("%H%M")
+                run_name = f"{month_day}-{year}-{time_str}"
+                self.logger.info("Run name generated: %s", run_name)
+            except Exception as e:  # pylint: disable=broad-except
+                self.logger.error("Failed to generate run name: %s", str(e))
+                run_name = None
+        else:
+            self.logger.info("Using default run name")
 
         return log_path, run_name
-
 
     def get_community_gallery_image(self, message):
         """Extract community gallery image from the messages."""

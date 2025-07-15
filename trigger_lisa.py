@@ -14,6 +14,7 @@ class LisaRunner:
 
     async def trigger_lisa(
         self, region, community_gallery_image, config):
+        # pylint: disable=too-many-return-statements,too-many-branches
         """Trigger LISA tier 1 tests with the provided parameters.
 
         Args:
@@ -30,12 +31,26 @@ class LisaRunner:
                   False if the test failed, had errors, or if required parameters are missing.
         """
         # Validate the input parameters
-        if not all([region, community_gallery_image,
-                     config.get("subscription"), config.get("private_key")]):
+        if not region or not isinstance(region, str):
+            self.logger.error("Invalid region parameter: must be a non-empty string")
+            return False
+
+        if not community_gallery_image or not isinstance(community_gallery_image, str):
             self.logger.error(
-                "Missing required parameters: region, "
-                "community_gallery_image, subscription, or private_key."
+                "Invalid community_gallery_image parameter: must be a non-empty string"
             )
+            return False
+
+        if not isinstance(config, dict):
+            self.logger.error("Invalid config parameter: must be a dictionary")
+            return False
+
+        if not config.get("subscription"):
+            self.logger.error("Missing required parameter: subscription")
+            return False
+
+        if not config.get("private_key"):
+            self.logger.error("Missing required parameter: private_key")
             return False
 
         try:
@@ -54,10 +69,20 @@ class LisaRunner:
             for var in variables:
                 command.extend(["-v", var])
 
-            command.extend([
-                "-l", config.get("log_path"),
-                "-i", config.get("run_name"),
-            ])
+            # Add optional parameters only if they are provided
+            log_path = config.get("log_path")
+            if log_path:
+                command.extend(["-l", log_path])
+                self.logger.debug("Added log path: %s", log_path)
+            else:
+                self.logger.debug("No log path provided, using LISA default")
+
+            run_name = config.get("run_name")
+            if run_name:
+                command.extend(["-i", run_name])
+                self.logger.debug("Added run name: %s", run_name)
+            else:
+                self.logger.debug("No run name provided, using LISA default")
 
             self.logger.info("Starting LISA test with command: %s", " ".join(command))
             process = await asyncio.create_subprocess_exec(
