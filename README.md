@@ -1,65 +1,252 @@
 # Fedora Nightly Cloud Image Testing on Azure
-This repository automates the validation of Fedora nightly cloud images on Azure, initially focusing specifically on executing Tier 0 test cases using [LISA](https://github.com/microsoft/lisa) framework.
 
-The workflow begins by consuming image publish messages using the fedora-messaging API. Once a message is received, the system automatically triggers the trigger_lisa module, which initializes and executes LISA tests on Azure infrastructure.
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
 
-All dependencies required to run LISA and the associated tooling are installed using the install_dependencies.sh
+This repository automates the validation of Fedora nightly cloud images on Azure infrastructure, executing Tier 1 test cases using the [LISA](https://github.com/microsoft/lisa) (Linux Integration Services Automation) framework.
 
+## Table of Contents
 
+- [Overview](#overview)
+- [Supported Fedora Versions](#supported-fedora-versions)
+- [Prerequisites](#prerequisites)
+- [Installation](#installation)
+- [Configuration](#configuration)
+- [Usage](#usage)
+- [Results](#results)
+- [Troubleshooting](#troubleshooting)
 
-## Pre-requisites:
+## Overview
 
-1. Clone [LISA](https://github.com/microsoft/lisa) framework on the latest fedora and install it.
-2. Use install_dependencies.sh to install all the dependent pacakges needed.
-3. Login to azure using azure-cli
-   `az login `
+1. Consumes Fedora nightly image publish messages via fedora-messaging API
+2. Automatically triggers LISA tests when valid messages are received
+3. Executes Tier 1 test suites on Azure infrastructure
+4. Generates HTML reports with test results and artifacts
 
-## How to Run Tests
-
-### 1. Install Required Dependencies
-
-First, install fedora-messaging using dnf:
-```bash
-sudo dnf install fedora-messaging
+```
+fedora-messaging → AzurePublishedConsumer → LISA Tests → Test Reports
 ```
 
-### 2. Clone and Setup LISA Repository
+The workflow components:
+- **Message Consumer**: Listens for `AzurePublishedV1` messages from Fedora's message bus
+- **Image Validation**: Validates messages for supported Fedora versions and architectures
+- **Test Orchestration**: Triggers LISA framework with Azure configurations
+- **Result Collection**: Aggregates test results and generates reports
 
-Clone the LISA repository:
+## Supported Fedora Versions
+
+- **Fedora Cloud Rawhide** (x86_64, ARM64)
+- **Fedora Cloud 41** (x86_64, ARM64)
+- **Fedora Cloud 42** (x86_64, ARM64)
+
+
+
+## Prerequisites
+
+### System Requirements
+- **Operating System**: Latest Fedora Linux
+- **Python**: 3.8 or higher
+- **Architecture**: x86_64
+
+### Required Accounts and Access
+- Azure subscription with appropriate permissions
+- Azure CLI installed and configured
+
+### Dependencies
+System dependencies are installed using the provided script.
+
+## Installation
+
+### 1. Install Dependencies
+
+#### System Dependencies
+
+```bash
+chmod +x install_system_dependencies.sh
+./install_system_dependencies.sh
+```
+
+This installs Git, GCC, Python 3, Azure CLI, QEMU/libvirt libraries, and fedora-messaging.
+
+#### Python Dependencies
+
+```bash
+pip install fedora-messaging fedora-image-uploader-messages
+```
+
+**Note**: If not using a virtual environment, you may need to use `pip3` or `sudo pip3` depending on your system configuration.
+
+### 2. Clone and Setup Repositories
+
+#### Clone and Setup LISA Repository
+
 ```bash
 git clone https://github.com/microsoft/lisa
 cd lisa
+pip install -e .
+cd ..
 ```
 
-Note: LISA must be run from within its own directory after cloning. You cannot run LISA from any other directory after installation.
+**Important**: LISA tests must be executed from within the LISA repository directory.
 
-### 3. Setup Fedora Messaging Configuration
-
-Create the required configuration files and certificates following the [Fedora Messaging Quick Start Guide](https://fedora-messaging.readthedocs.io/en/stable/user-guide/quick-start.html):
-
-1. Create the fedora.toml configuration file at `/etc/fedora-messaging/fedora.toml`
-2. Obtain and configure your key certificate
-3. Obtain and configure your CA certificate
-
-### 4. Run the Test Consumer
-
-From within the `lisa` directory, run the fedora-messaging consumer with the proper Python path:
+#### Clone This Repository
 
 ```bash
-cd lisa
-PYTHONPATH=/home/user/fedora-nightly-azure-image-validation fedora-messaging --conf /etc/fedora-messaging/fedora.toml consume --callback="consume:AzurePublishedConsumer"
+git clone https://github.com/balakreddy/fedora-nightly-azure-image-validation
+cd fedora-nightly-azure-image-validation
 ```
 
-To reconsume messages (for testing/debugging):
+## Configuration
+
+### Azure Authentication
+
+1. **Login to Azure CLI**:
+   ```bash
+   az login
+   ```
+
+2. **Set Default Subscription** (if you have multiple):
+   ```bash
+   az account set --subscription "your-subscription-id"
+   ```
+
+3. **Verify Access**:
+   ```bash
+   az account show
+   ```
+
+### Fedora Messaging Setup
+
+1. **Create Configuration Directory**:
+   ```bash
+   sudo mkdir -p /etc/fedora-messaging
+   ```
+
+2. **Download Required Certificates and Configuration**:
+   ```bash
+   # Download public certificates and configuration files
+   sudo wget -O /etc/fedora-messaging/fedora-key.pem \
+     https://raw.githubusercontent.com/fedora-infra/fedora-messaging/stable/configs/fedora-key.pem
+   
+   sudo wget -O /etc/fedora-messaging/fedora-cert.pem \
+     https://raw.githubusercontent.com/fedora-infra/fedora-messaging/stable/configs/fedora-cert.pem
+   
+   sudo wget -O /etc/fedora-messaging/cacert.pem \
+     https://raw.githubusercontent.com/fedora-infra/fedora-messaging/stable/configs/cacert.pem
+   
+   sudo wget -O /etc/fedora-messaging/fedora.toml \
+     https://raw.githubusercontent.com/fedora-infra/fedora-messaging/stable/configs/fedora.toml
+   ```
+
+3. **Create Custom Configuration with Unique Queue**:
+   ```bash
+   # Generate unique queue name to avoid message conflicts
+   sed -e "s/[0-9a-f]\{8\}-[0-9a-f]\{4\}-[0-9a-f]\{4\}-[0-9a-f]\{4\}-[0-9a-f]\{12\}/$(uuidgen)/g" \
+       /etc/fedora-messaging/fedora.toml > my_config.toml
+   ```
+
+4. **Test Connection**:
+   ```bash
+   fedora-messaging --conf my_config.toml consume --help
+   ```
+
+### Application Configuration
+
+Configuration parameters in `consume.py`:
+
+```python
+REGION = "westus3"  # Azure region for test execution
+PRIVATE_KEY = "/path/to/your/ssh/private/key"  # SSH key for VM access
+SUBSCRIPTION_ID = "your-azure-subscription-id"  # Your Azure subscription
+```
+
+**Security Note**: Store sensitive information securely using environment variables or Azure Key Vault.
+
+## Usage
+
+### Running the Consumer
+
+1. **Navigate to LISA Directory**:
+   ```bash
+   cd lisa
+   ```
+
+2. **Start the Message Consumer**:
+   ```bash
+   PYTHONPATH=/path/to/fedora-nightly-azure-image-validation \
+   fedora-messaging --conf my_config.toml \
+   consume --callback="consume:AzurePublishedConsumer"
+   ```
+
+3. **For Testing/Debugging** - Reconsume Specific Messages:
+   ```bash
+   PYTHONPATH=/path/to/fedora-nightly-azure-image-validation \
+   fedora-messaging --conf my_config.toml \
+   reconsume --callback="consume:AzurePublishedConsumer" "<message-id>"
+   ```
+
+### Environment Variables
+
 ```bash
-cd lisa
-PYTHONPATH=/home/user/fedora-nightly-azure-image-validation fedora-messaging --conf /etc/fedora-messaging/fedora.toml reconsume --callback="consume:AzurePublishedConsumer" "<message-id>"
+export AZURE_SUBSCRIPTION_ID="your-subscription-id"
+export AZURE_REGION="westus3"
+export SSH_PRIVATE_KEY_PATH="/path/to/key"
+export PYTHONPATH="/path/to/fedora-nightly-azure-image-validation"
 ```
 
-### 5. Monitor Test Execution
+## Results
 
-The system will:
-- Listen for Fedora nightly image publish messages
-- Automatically trigger LISA tests when valid messages are received
-- Execute Tier 0 test cases on Azure infrastructure
-- Generate HTML output reports with test results
+Test results are stored in the LISA runtime directory as HTML reports. Logs are available in `consumer.log` and LISA's runtime directory.
+
+## Troubleshooting
+
+### Common Issues
+
+1. **Authentication Failures**
+   ```
+   Error: Failed to authenticate with Azure
+   ```
+   **Solution**: Run `az login` and verify your subscription access
+
+2. **LISA Import Errors**
+   ```
+   ModuleNotFoundError: No module named 'lisa'
+   ```
+   **Solution**: Ensure you're running from within the LISA directory and PYTHONPATH is correctly set
+
+3. **fedora-messaging Connection Issues**
+   ```
+   Connection refused to message broker
+   ```
+   **Solution**: Verify your `my_config.toml` configuration and certificates
+
+4. **Permission Denied Errors**
+   ```
+   Permission denied: '/etc/fedora-messaging/fedora.toml'
+   ```
+   **Solution**: Check file permissions and ensure proper certificate setup
+
+### Debug Mode
+
+Enable debug logging:
+
+```python
+logging.basicConfig(level=logging.DEBUG)
+```
+
+### Validation Steps
+
+1. **Test fedora-messaging connection**:
+   ```bash
+   fedora-messaging --conf my_config.toml consume --help
+   ```
+
+2. **Verify LISA installation**:
+   ```bash
+   cd lisa && python -m lisa --help
+   ```
+
+3. **Check Azure connectivity**:
+   ```bash
+   az vm list --output table
+   ```
