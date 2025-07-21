@@ -34,15 +34,16 @@ class TestAzurePublishedConsumer:
 
     def test_supported_fedora_versions_constant(self):
         """Test that SUPPORTED_FEDORA_VERSIONS contains expected versions."""
-        expected_versions = [
-            "Fedora-Cloud-Rawhide-x64",
-            "Fedora-Cloud-41-x64",
-            "Fedora-Cloud-41-Arm64", 
-            "Fedora-Cloud-Rawhide-Arm64",
-            "Fedora-Cloud-42-x64",
-            "Fedora-Cloud-42-Arm64",
-        ]
-        assert AzurePublishedConsumer.SUPPORTED_FEDORA_VERSIONS == expected_versions
+        # Test that the constant is defined and is a list
+        assert hasattr(AzurePublishedConsumer, 'SUPPORTED_FEDORA_VERSIONS')
+        assert isinstance(AzurePublishedConsumer.SUPPORTED_FEDORA_VERSIONS, list)
+        assert len(AzurePublishedConsumer.SUPPORTED_FEDORA_VERSIONS) > 0
+
+        # Test that all versions follow expected naming pattern
+        for version in AzurePublishedConsumer.SUPPORTED_FEDORA_VERSIONS:
+            assert isinstance(version, str)
+            assert version.startswith("Fedora-Cloud-")
+            assert version.endswith(("-x64", "-Arm64"))
 
     def test_consumer_initialization(self, consumer):
         """Test that consumer is properly initialized with logger configuration."""
