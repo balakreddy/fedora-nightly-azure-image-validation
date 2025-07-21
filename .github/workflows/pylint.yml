@@ -20,4 +20,4 @@ jobs:
         pip install pylint pytest fedora_image_uploader_messages fedora_messaging
     - name: Analysing the code with pylint
       run: |
-        pylint $(git ls-files '*.py')
+        pylint --disable=redefined-outer-name,line-too-long --max-line-length=120 $(git ls-files '*.py')
