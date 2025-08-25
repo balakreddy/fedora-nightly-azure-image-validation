@@ -8,7 +8,7 @@ from datetime import datetime
 from fedora_image_uploader_messages.publish import AzurePublishedV1
 from fedora_messaging.api import consume
 
-from trigger_lisa import LisaRunner
+from .trigger_lisa import LisaRunner
 
 REGION = "westus3"  # Default region in which the LISA tests will be run
 PRIVATE_KEY = ""  # Path to the private key file for Azure authentication
