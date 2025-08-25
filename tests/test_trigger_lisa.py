@@ -3,7 +3,7 @@
 import asyncio
 from unittest.mock import patch, MagicMock, AsyncMock
 import pytest
-from trigger_lisa import LisaRunner
+from fedora_cloud_tests.trigger_lisa import LisaRunner
 
 
 @pytest.fixture
@@ -291,4 +291,4 @@ class TestLisaRunner:
         """Test LisaRunner initialization without custom logger."""
         runner = LisaRunner()
         assert runner.logger is not None
-        assert runner.logger.name == "trigger_lisa"
+        assert runner.logger.name == "fedora_cloud_tests.trigger_lisa"
