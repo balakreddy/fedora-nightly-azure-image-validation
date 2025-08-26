@@ -4,13 +4,15 @@ import asyncio
 import logging
 import subprocess
 
+_log = logging.getLogger(__name__)
+
 
 # pylint: disable=too-few-public-methods
 class LisaRunner:
     """Class to run LISA tests asynchronously"""
 
-    def __init__(self, logger=None):
-        self.logger = logger or logging.getLogger(__name__)
+    def __init__(self):
+        pass
 
     async def trigger_lisa(
         self, region, community_gallery_image, config):
@@ -32,25 +34,25 @@ class LisaRunner:
         """
         # Validate the input parameters
         if not region or not isinstance(region, str):
-            self.logger.error("Invalid region parameter: must be a non-empty string")
+            _log.error("Invalid region parameter: must be a non-empty string")
             return False
 
         if not community_gallery_image or not isinstance(community_gallery_image, str):
-            self.logger.error(
+            _log.error(
                 "Invalid community_gallery_image parameter: must be a non-empty string"
             )
             return False
 
         if not isinstance(config, dict):
-            self.logger.error("Invalid config parameter: must be a dictionary")
+            _log.error("Invalid config parameter: must be a dictionary")
             return False
 
         if not config.get("subscription"):
-            self.logger.error("Missing required parameter: subscription")
+            _log.error("Missing required parameter: subscription")
             return False
 
         if not config.get("private_key"):
-            self.logger.error("Missing required parameter: private_key")
+            _log.error("Missing required parameter: private_key")
             return False
 
         try:
@@ -73,37 +75,37 @@ class LisaRunner:
             log_path = config.get("log_path")
             if log_path:
                 command.extend(["-l", log_path])
-                self.logger.debug("Added log path: %s", log_path)
+                _log.debug("Added log path: %s", log_path)
             else:
-                self.logger.debug("No log path provided, using LISA default")
+                _log.debug("No log path provided, using LISA default")
 
             run_name = config.get("run_name")
             if run_name:
                 command.extend(["-i", run_name])
-                self.logger.debug("Added run name: %s", run_name)
+                _log.debug("Added run name: %s", run_name)
             else:
-                self.logger.debug("No run name provided, using LISA default")
+                _log.debug("No run name provided, using LISA default")
 
-            self.logger.info("Starting LISA test with command: %s", " ".join(command))
+            _log.info("Starting LISA test with command: %s", " ".join(command))
             process = await asyncio.create_subprocess_exec(
                 *command, stdout=subprocess.PIPE, stderr=subprocess.PIPE
             )
             stdout, stderr = await process.communicate()
 
             if process.returncode == 0:
-                self.logger.info(
+                _log.info(
                     "LISA test completed successfully with output %s.",
                     stdout.decode(),
                 )
                 if stderr:
-                    self.logger.info("LISA test has warnings: %s", stderr.decode())
+                    _log.info("LISA test has warnings: %s", stderr.decode())
                 return True
-            self.logger.error("Triggering LISA tests failed %d", process.returncode)
+            _log.error("Triggering LISA tests failed %d", process.returncode)
             if stdout:
-                self.logger.error("Standard Output: %s", stdout.decode())
+                _log.error("Standard Output: %s", stdout.decode())
             if stderr:
-                self.logger.error("Standard Error: %s", stderr.decode())
+                _log.error("Standard Error: %s", stderr.decode())
             return False
         except Exception as e:  # pylint: disable=broad-except
-            self.logger.error("An error occurred while running the tests: %s", str(e))
+            _log.error("An error occurred while running the tests: %s", str(e))
             return False

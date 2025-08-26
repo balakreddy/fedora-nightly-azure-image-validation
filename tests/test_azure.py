@@ -1,16 +1,29 @@
-"""Unit tests for the AzurePublishedConsumer class in consume.py."""
+"""Unit tests for the AzurePublishedConsumer class in azure.py."""
 
-import logging
 from unittest.mock import patch, MagicMock, Mock
 
 import pytest
 from fedora_image_uploader_messages.publish import AzurePublishedV1
+from fedora_messaging import config as fm_config
 
-from fedora_cloud_tests.consume import AzurePublishedConsumer
+from fedora_cloud_tests.azure import AzurePublishedConsumer
 
+@pytest.fixture(scope="module")
+def azure_conf():
+    """Provide a minimal config for Azure in the fedora-messaging configuration dictionary."""
+    with patch.dict(
+        fm_config.conf["consumer_config"],
+        {
+            "azure": {
+                "region": "westus3",
+                "subscription_id": "00000000-0000-0000-0000-000000000000",
+            }
+        },
+    ):
+        yield
 
 @pytest.fixture
-def consumer():
+def consumer(azure_conf):
     """Create an AzurePublishedConsumer instance for testing."""
     return AzurePublishedConsumer()
 
@@ -45,13 +58,6 @@ class TestAzurePublishedConsumer:
             assert version.startswith("Fedora-Cloud-")
             assert version.endswith(("-x64", "-Arm64"))
 
-    def test_consumer_initialization(self, consumer):
-        """Test that consumer is properly initialized with logger configuration."""
-        assert consumer.logger is not None
-        assert len(consumer.logger.handlers) == 2  # File and console handlers
-        assert consumer.logger.level == logging.INFO
-        assert not consumer.logger.propagate
-
     def test_get_image_definition_name_success(self, consumer, valid_message):
         """Test successful extraction of image definition name."""
         result = consumer._get_image_definition_name(valid_message)
@@ -75,8 +81,8 @@ class TestAzurePublishedConsumer:
     def test_generate_test_log_path(self, consumer):
         """Test log path and run name generation with different configurations."""
         # Test with custom settings enabled
-        with patch('fedora_cloud_tests.consume.CUSTOM_LOG_PATH', True):
-            with patch('fedora_cloud_tests.consume.CUSTOM_RUN_NAME', True):
+        with patch('fedora_cloud_tests.azure.CUSTOM_LOG_PATH', True):
+            with patch('fedora_cloud_tests.azure.CUSTOM_RUN_NAME', True):
                 with patch('os.path.expanduser', return_value="/home/user/lisa_results"):
                     with patch('os.makedirs'):
                         log_path, run_name = consumer._generate_test_log_path("Fedora-Cloud-Rawhide-x64")
@@ -85,8 +91,8 @@ class TestAzurePublishedConsumer:
                         assert isinstance(run_name, str)
 
         # Test with custom settings disabled
-        with patch('fedora_cloud_tests.consume.CUSTOM_LOG_PATH', False):
-            with patch('fedora_cloud_tests.consume.CUSTOM_RUN_NAME', False):
+        with patch('fedora_cloud_tests.azure.CUSTOM_LOG_PATH', False):
+            with patch('fedora_cloud_tests.azure.CUSTOM_RUN_NAME', False):
                 log_path, run_name = consumer._generate_test_log_path("Fedora-Cloud-Rawhide-x64")
                 assert log_path is None
                 assert run_name is None
@@ -94,17 +100,17 @@ class TestAzurePublishedConsumer:
     def test_generate_test_log_path_error_handling(self, consumer):
         """Test error handling during log path creation and run name generation."""
         # Test log path creation failure
-        with patch('fedora_cloud_tests.consume.CUSTOM_LOG_PATH', True):
-            with patch('fedora_cloud_tests.consume.CUSTOM_RUN_NAME', False):
+        with patch('fedora_cloud_tests.azure.CUSTOM_LOG_PATH', True):
+            with patch('fedora_cloud_tests.azure.CUSTOM_RUN_NAME', False):
                 with patch('os.makedirs', side_effect=OSError("Permission denied")):
                     log_path, run_name = consumer._generate_test_log_path("test-image")
                     assert log_path is None
                     assert run_name is None
 
         # Test run name generation failure
-        with patch('fedora_cloud_tests.consume.CUSTOM_LOG_PATH', False):
-            with patch('fedora_cloud_tests.consume.CUSTOM_RUN_NAME', True):
-                with patch('fedora_cloud_tests.consume.datetime') as mock_datetime:
+        with patch('fedora_cloud_tests.azure.CUSTOM_LOG_PATH', False):
+            with patch('fedora_cloud_tests.azure.CUSTOM_RUN_NAME', True):
+                with patch('fedora_cloud_tests.azure.datetime') as mock_datetime:
                     mock_datetime.now.side_effect = Exception("Time error")
                     log_path, run_name = consumer._generate_test_log_path("test-image")
                     assert log_path is None
@@ -153,19 +159,19 @@ class TestAzurePublishedConsumer:
         # The current code allows this and creates: "westus3//Fedora-Cloud-Rawhide-x64/20250101.0"
         assert result == "westus3//Fedora-Cloud-Rawhide-x64/20250101.0"
 
-    @patch('fedora_cloud_tests.consume.asyncio.run')
-    @patch('fedora_cloud_tests.consume.LisaRunner')
+    @patch('fedora_cloud_tests.azure.asyncio.run')
+    @patch('fedora_cloud_tests.azure.LisaRunner')
     def test_azure_published_callback_success(self, mock_lisa_runner, mock_asyncio_run, consumer, valid_message):
         """Test successful message processing and LISA trigger."""
         mock_runner_instance = MagicMock()
         mock_lisa_runner.return_value = mock_runner_instance
 
         consumer.azure_published_callback(valid_message)
-        mock_lisa_runner.assert_called_once_with(logger=consumer.logger)
+        mock_lisa_runner.assert_called_once_with()
         mock_asyncio_run.assert_called_once()
 
-    @patch('fedora_cloud_tests.consume.asyncio.run')
-    @patch('fedora_cloud_tests.consume.LisaRunner')
+    @patch('fedora_cloud_tests.azure.asyncio.run')
+    @patch('fedora_cloud_tests.azure.LisaRunner')
     def test_azure_published_callback_unsupported_image(self, mock_lisa_runner, mock_asyncio_run, consumer):
         """Test handling when community gallery image cannot be processed."""
         message = Mock()
@@ -176,8 +182,8 @@ class TestAzurePublishedConsumer:
         mock_lisa_runner.assert_not_called()
         mock_asyncio_run.assert_not_called()
 
-    @patch('fedora_cloud_tests.consume.asyncio.run', side_effect=Exception("LISA execution failed"))
-    @patch('fedora_cloud_tests.consume.LisaRunner')
+    @patch('fedora_cloud_tests.azure.asyncio.run', side_effect=Exception("LISA execution failed"))
+    @patch('fedora_cloud_tests.azure.LisaRunner')
     def test_azure_published_callback_lisa_exception(self, mock_lisa_runner, mock_asyncio_run, consumer, valid_message):
         """Test exception handling when LISA execution fails."""
         mock_runner_instance = MagicMock()
@@ -189,7 +195,7 @@ class TestAzurePublishedConsumer:
 
     def test_azure_published_callback_message_validation_exception(self, consumer, valid_message):
         """Test exception handling during message type validation."""
-        with patch('fedora_cloud_tests.consume.isinstance', side_effect=Exception("Validation error")):
+        with patch('fedora_cloud_tests.azure.isinstance', side_effect=Exception("Validation error")):
             # Should not crash, just log the error and continue processing
             consumer.azure_published_callback(valid_message)
 
