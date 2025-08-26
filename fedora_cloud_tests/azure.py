@@ -1,4 +1,10 @@
-"""Consumer for AzurePublishedV1 messages and LISA trigger."""
+"""
+AMQP consumer that processes messages from fedora-image-uploader when it uploads
+a new Cloud image to Azure.
+
+This consumer is responsible for testing the new image via LISA and annotating the
+image with the results.
+"""
 
 import asyncio
 import logging
@@ -6,15 +12,15 @@ import os
 from datetime import datetime
 
 from fedora_image_uploader_messages.publish import AzurePublishedV1
-from fedora_messaging.api import consume
+from fedora_messaging import config
 
 from .trigger_lisa import LisaRunner
 
-REGION = "westus3"  # Default region in which the LISA tests will be run
 PRIVATE_KEY = ""  # Path to the private key file for Azure authentication
-SUBSCRIPTION_ID = ""  # Subscription ID for Azure
 CUSTOM_LOG_PATH = True  # Flag to indicate if a custom log path should be used
 CUSTOM_RUN_NAME = True  # Flag to indicate if a custom run name should be generated
+
+_log = logging.getLogger(__name__)
 
 
 class AzurePublishedConsumer:
@@ -31,38 +37,15 @@ class AzurePublishedConsumer:
         ]
 
     def __init__(self):
-        # Configure the logger
-        self.logger = logging.getLogger(__name__)
-        self.logger.setLevel(logging.INFO)
-
-        # Remove any existing handlers to avoid duplicate logs
-        for handler in self.logger.handlers[:]:
-            self.logger.removeHandler(handler)
-
-        # Create a new file handler for logging
-        log_file = os.path.join(
-            os.path.dirname(os.path.abspath(__file__)), "consumer.log"
-        )
-        file_handler = logging.FileHandler(log_file)
-        file_handler.setLevel(logging.INFO)
-        formatter = logging.Formatter(
-            "%(asctime)s - [%(name)s] - [%(levelname)s] - %(message)s"
-        )
-        file_handler.setFormatter(formatter)
-
-        # Add handler to the logger
-        self.logger.addHandler(file_handler)
-
-        # Also add console handler with same formatter
-        console_handler = logging.StreamHandler()
-        console_handler.setLevel(logging.INFO)
-        console_handler.setFormatter(formatter)
-        self.logger.addHandler(console_handler)
-        self.logger.propagate = False
+        try:
+            self.conf = config.conf["consumer_config"]["azure"]
+        except KeyError:
+            _log.error("The Azure consumer requires an 'azure' config section")
+            raise
 
     def __call__(self, message):
         """Callback method to handle incoming messages."""
-        self.logger.info("Received message: %s", message)
+        _log.info("Received message: %s", message)
         self.azure_published_callback(message)
 
     def _get_image_definition_name(self, message):
@@ -78,14 +61,14 @@ class AzurePublishedConsumer:
         try:
             image_definition_name = message.body.get("image_definition_name")
             if not isinstance(image_definition_name, str):
-                self.logger.error(
+                _log.error(
                     "image_definition_name is not a string: %s", image_definition_name
                 )
                 return None
-            self.logger.info("Extracted image_definition_name: %s", image_definition_name)
+            _log.info("Extracted image_definition_name: %s", image_definition_name)
             return image_definition_name
         except AttributeError:
-            self.logger.error("Message body does not have 'image_definition_name' field.")
+            _log.error("Message body does not have 'image_definition_name' field.")
             return None
 
     def _generate_test_log_path(self, image_definition_name):
@@ -107,17 +90,17 @@ class AzurePublishedConsumer:
             try:
                 base_log_path = os.path.expanduser("~/lisa_results")
                 os.makedirs(base_log_path, exist_ok=True)
-                self.logger.info("Base log path created: %s", base_log_path)
+                _log.info("Base log path created: %s", base_log_path)
 
                 # Create image-specific log directory
                 log_path = os.path.join(base_log_path, image_definition_name)
                 os.makedirs(log_path, exist_ok=True)
-                self.logger.info("Log path created: %s", log_path)
+                _log.info("Log path created: %s", log_path)
             except Exception as e: # pylint: disable=broad-except
-                self.logger.error("Failed to create log path: %s", str(e))
+                _log.error("Failed to create log path: %s", str(e))
                 log_path = None
         else:
-            self.logger.info("Using default log path")
+            _log.info("Using default log path")
 
         # Generate custom run name if CUSTOM_RUN_NAME is set to True
         if CUSTOM_RUN_NAME:
@@ -127,31 +110,31 @@ class AzurePublishedConsumer:
                 year = current_date.strftime("%Y")
                 time_str = current_date.strftime("%H%M")
                 run_name = f"{month_day}-{year}-{time_str}"
-                self.logger.info("Run name generated: %s", run_name)
+                _log.info("Run name generated: %s", run_name)
             except Exception as e:  # pylint: disable=broad-except
-                self.logger.error("Failed to generate run name: %s", str(e))
+                _log.error("Failed to generate run name: %s", str(e))
                 run_name = None
         else:
-            self.logger.info("Using default run name")
+            _log.info("Using default run name")
 
         return log_path, run_name
 
     def get_community_gallery_image(self, message):
         """Extract community gallery image from the messages."""
-        self.logger.info(
+        _log.info(
             "Extracting community gallery image from the message: %s", message.body
         )
         try:
             # Validate message.body is a dict
             if not isinstance(message.body, dict):
-                self.logger.error("Message body is not a dictionary.")
+                _log.error("Message body is not a dictionary.")
                 return None
 
             image_definition_name = self._get_image_definition_name(message)
             # Run tests only for fedora rawhide, 41 and 42,
             #  include your Fedora versions in SUPPORTED_FEDORA_VERSIONS
             if image_definition_name not in self.SUPPORTED_FEDORA_VERSIONS:
-                self.logger.info(
+                _log.info(
                     "image_definition_name '%s' not in supported Fedora"
                     " versions, skipping.",
                     image_definition_name,
@@ -162,42 +145,42 @@ class AzurePublishedConsumer:
 
             # Check for missing fields
             if not all([image_definition_name, image_version_name, image_resource_id]):
-                self.logger.error("Missing required image fields in message body.")
+                _log.error("Missing required image fields in message body.")
                 return None
 
             # Defensive split and validation
             parts = image_resource_id.split("/")
             if len(parts) < 3:
-                self.logger.error(
+                _log.error(
                     "image_resource_id format is invalid: %s", image_resource_id
                 )
                 return None
             resource_id = parts[2]
 
             community_gallery_image = (
-                f"{REGION}/{resource_id}/"
+                f"{self.conf['region']}/{resource_id}/"
                 f"{image_definition_name}/{image_version_name}"
             )
-            self.logger.info(
+            _log.info(
                 "Constructed community gallery image: %s", community_gallery_image
             )
             return community_gallery_image
 
         except Exception as e:  # pylint: disable=broad-except
-            self.logger.error(
+            _log.error(
                 "Failed to extract image details from the message: %s", str(e)
             )
             return None
 
     def azure_published_callback(self, message):
         """Handle Azure published messages"""
-        self.logger.info("Received message on topic: %s", message.topic)
-        self.logger.info("Message %s", message.body)
+        _log.info("Received message on topic: %s", message.topic)
+        _log.info("Message %s", message.body)
         try:
             if isinstance(message, AzurePublishedV1):
-                self.logger.info("Message properties match AzurePublishedV1 schema.")
+                _log.info("Message properties match AzurePublishedV1 schema.")
         except Exception as e:  # pylint: disable=broad-except
-            self.logger.error(
+            _log.error(
                 "Message properties do not match AzurePublishedV1 schema: %s", str(e)
             )
 
@@ -205,47 +188,28 @@ class AzurePublishedConsumer:
 
         try:
             if not community_gallery_image:
-                self.logger.error(
+                _log.error(
                     "Unsupported or No community gallery image found in the message."
                 )
                 return
             log_path, run_name = self._generate_test_log_path(
                 self._get_image_definition_name(message))
-            self.logger.info("Test log path generated: %s", log_path)
+            _log.info("Test log path generated: %s", log_path)
             config_params = {
-                "subscription": SUBSCRIPTION_ID,
+                "subscription": self.conf["subscription_id"],
                 "private_key": PRIVATE_KEY,
                 "log_path": log_path,
                 "run_name": run_name,
             }
-            runner = LisaRunner(logger=self.logger)
+            runner = LisaRunner()
             asyncio.run(
                 runner.trigger_lisa(
-                    region=REGION,
+                    region=self.conf["region"],
                     community_gallery_image=community_gallery_image,
                     config=config_params
                 )
             )
-            self.logger.info("LISA trigger executed successfully.")
+            _log.info("LISA trigger executed successfully.")
         except Exception as e:  # pylint: disable=broad-except
-            self.logger.exception("Failed to trigger LISA: %s", str(e))
+            _log.exception("Failed to trigger LISA: %s", str(e))
 
-
-if __name__ == "__main__":
-    # Create an instance of the consumer
-    consumer = AzurePublishedConsumer()
-    consumer.logger.info("Starting AzurePublishedV1 consumer...")
-
-    bindings = [
-        {
-            "exchange": "amq.topic",
-            "queue": "azure_published_consumer",
-            "routing_keys": [
-                "org.fedoraproject.prod.fedora_image_uploader.published.v1.azure.*"
-            ],
-        }
-    ]
-    consumer.logger.info("Bindings configured: %s", bindings)
-
-    consume(consumer, bindings=bindings)
-    consumer.logger.info("Consumer started successfully.")

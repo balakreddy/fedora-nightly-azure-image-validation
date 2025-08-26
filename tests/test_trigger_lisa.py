@@ -3,13 +3,13 @@
 import asyncio
 from unittest.mock import patch, MagicMock, AsyncMock
 import pytest
-from fedora_cloud_tests.trigger_lisa import LisaRunner
+from fedora_cloud_tests import trigger_lisa
 
 
 @pytest.fixture
 def runner():
     """Create a LisaRunner instance for testing."""
-    return LisaRunner()
+    return trigger_lisa.LisaRunner()
 
 
 @pytest.fixture
@@ -66,7 +66,7 @@ class TestLisaRunner:
             )
             mock_subproc_exec.return_value = mock_process
 
-            with patch.object(runner.logger, "info") as mock_logger_info:
+            with patch.object(trigger_lisa._log, "info") as mock_logger_info:
                 result = await runner.trigger_lisa(
                     region, community_gallery_image, config_params
                 )
@@ -88,7 +88,7 @@ class TestLisaRunner:
             )
             mock_subproc_exec.return_value = mock_process
 
-            with patch.object(runner.logger, "error") as mock_logger_error:
+            with patch.object(trigger_lisa._log, "error") as mock_logger_error:
                 result = await runner.trigger_lisa(
                     region, community_gallery_image, config_params
                 )
@@ -104,7 +104,7 @@ class TestLisaRunner:
         with patch(
             "asyncio.create_subprocess_exec", side_effect=Exception("Process failed")
         ):
-            with patch.object(runner.logger, "error") as mock_logger_error:
+            with patch.object(trigger_lisa._log, "error") as mock_logger_error:
                 result = await runner.trigger_lisa(
                     region, community_gallery_image, config_params
                 )
@@ -117,7 +117,7 @@ class TestLisaRunner:
     @pytest.mark.asyncio
     async def test_trigger_lisa_missing_region(self, runner, community_gallery_image, config_params):
         """Test validation failure when region is missing."""
-        with patch.object(runner.logger, "error") as mock_logger_error:
+        with patch.object(trigger_lisa._log, "error") as mock_logger_error:
             result = await runner.trigger_lisa(
                 "", community_gallery_image, config_params
             )
@@ -130,7 +130,7 @@ class TestLisaRunner:
     @pytest.mark.asyncio
     async def test_trigger_lisa_missing_community_gallery_image(self, runner, region, config_params):
         """Test validation failure when community_gallery_image is missing."""
-        with patch.object(runner.logger, "error") as mock_logger_error:
+        with patch.object(trigger_lisa._log, "error") as mock_logger_error:
             result = await runner.trigger_lisa(region, "", config_params)
 
             assert result is False
@@ -144,7 +144,7 @@ class TestLisaRunner:
         config_without_subscription = config_params.copy()
         del config_without_subscription["subscription"]
 
-        with patch.object(runner.logger, "error") as mock_logger_error:
+        with patch.object(trigger_lisa._log, "error") as mock_logger_error:
             result = await runner.trigger_lisa(
                 region, community_gallery_image, config_without_subscription
             )
@@ -160,7 +160,7 @@ class TestLisaRunner:
         config_without_private_key = config_params.copy()
         del config_without_private_key["private_key"]
 
-        with patch.object(runner.logger, "error") as mock_logger_error:
+        with patch.object(trigger_lisa._log, "error") as mock_logger_error:
             result = await runner.trigger_lisa(
                 region, community_gallery_image, config_without_private_key
             )
@@ -277,7 +277,7 @@ class TestLisaRunner:
     @pytest.mark.asyncio
     async def test_trigger_lisa_invalid_config_type(self, runner, region, community_gallery_image):
         """Test validation failure when config is not a dictionary."""
-        with patch.object(runner.logger, "error") as mock_logger_error:
+        with patch.object(trigger_lisa._log, "error") as mock_logger_error:
             result = await runner.trigger_lisa(
                 region, community_gallery_image, "not a dict"  # Invalid type
             )
@@ -286,9 +286,3 @@ class TestLisaRunner:
             mock_logger_error.assert_called_with(
                 "Invalid config parameter: must be a dictionary"
             )
-
-    def test_lisa_runner_init_without_logger(self):
-        """Test LisaRunner initialization without custom logger."""
-        runner = LisaRunner()
-        assert runner.logger is not None
-        assert runner.logger.name == "fedora_cloud_tests.trigger_lisa"

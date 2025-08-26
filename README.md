@@ -152,7 +152,7 @@ cd fedora-nightly-azure-image-validation
 
 ### Application Configuration
 
-Configuration parameters in `consume.py`:
+Configuration parameters in `azure.py`:
 
 ```python
 REGION = "westus3"  # Azure region for test execution
@@ -174,15 +174,13 @@ SUBSCRIPTION_ID = "your-azure-subscription-id"  # Your Azure subscription
 2. **Start the Message Consumer**:
    ```bash
    PYTHONPATH=/path/to/fedora-nightly-azure-image-validation \
-   fedora-messaging --conf my_config.toml \
-   consume --callback="consume:AzurePublishedConsumer"
+   fedora-messaging --conf my_config.toml consume
    ```
 
 3. **For Testing/Debugging** - Reconsume Specific Messages:
    ```bash
    PYTHONPATH=/path/to/fedora-nightly-azure-image-validation \
-   fedora-messaging --conf my_config.toml \
-   reconsume --callback="consume:AzurePublishedConsumer" "<message-id>"
+   fedora-messaging --conf my_config.toml reconsume "<message-id>"
    ```
 
 ### Environment Variables
