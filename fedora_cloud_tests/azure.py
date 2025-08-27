@@ -212,4 +212,3 @@ class AzurePublishedConsumer:
             _log.info("LISA trigger executed successfully.")
         except Exception as e:  # pylint: disable=broad-except
             _log.exception("Failed to trigger LISA: %s", str(e))
-

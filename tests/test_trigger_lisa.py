@@ -5,7 +5,7 @@ from unittest.mock import patch, MagicMock, AsyncMock
 import pytest
 from fedora_cloud_tests import trigger_lisa
 
-
+# pylint: disable=protected-access
 @pytest.fixture
 def runner():
     """Create a LisaRunner instance for testing."""
