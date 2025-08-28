@@ -23,7 +23,7 @@ def azure_conf():
         yield
 
 @pytest.fixture
-def consumer(azure_conf):
+def consumer(azure_conf):  # pylint: disable=unused-argument
     """Create an AzurePublishedConsumer instance for testing."""
     return AzurePublishedConsumer()
 
