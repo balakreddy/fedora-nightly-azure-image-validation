@@ -40,6 +40,53 @@ The workflow components:
 - **Fedora Cloud 42** (x86_64, ARM64)
 
 
+## Container
+
+A Containerfile is provided. To run this application from a container, you must first build it:
+
+```bash
+podman build -t fedora-cloud-tests:latest .
+```
+
+Next, we need to configure authentication for our application in Azure.
+
+1. Create a new key pair to authenticate to Azure:
+   ```bash
+   openssl req -x509 -new -nodes -sha256 -days 365 \
+     -addext "extendedKeyUsage = clientAuth" \
+     -subj "/CN=fedora-cloud-tests" \
+     -newkey rsa:4096 \
+     -keyout fedora-cloud-testing.key.pem \
+     -out fedora-cloud-testing.cert.pem
+   ```
+2. Create an app registration in Azure:
+   ```bash
+   # Make note of the 'Id' and 'AppId' fields in the output as you'll need these later.
+   az ad app create --display-name fedora-cloud-tests
+   # Add our certificate to use when authenticating
+   az ad app credential reset --id $APP_ID --append \
+     --display-name "Fedora Cloud Test Certificate" \
+     --cert "@./fedora-cloud-testing.cert.pem"
+   az ad sp create --id $APP_ID
+   # Note that this is an absurdly broad permission set; don't do this for production
+   az role assignment create --assignee $APP_ID --role "Contributor" --scope "/subscriptions/<your sub>"
+   ```
+3. Add the key pair to podman/docker secrets
+   ```bash
+   cat fedora-cloud-testing.key.pem fedora-cloud-testing.cert.pem > fedora-cloud-testing.pem
+   podman secret create fedora-cloud-testing-cert fedora-cloud-testing.pem
+   ```
+
+Finally, we're ready to run it. You'll need your Azure Directory (tenant) ID, as well as the 'AppId' from earlier.
+
+```bash
+podman run --rm -it -v "$(pwd)"/fedora-messaging.toml.example:/etc/fedora-messaging/config.toml:ro,Z \
+  --secret source=fedora-cloud-testing-cert,type=mount \
+  --env 'AZURE_CLIENT_CERTIFICATE_PATH=/run/secrets/fedora-cloud-testing-cert' \
+  --env 'AZURE_TENANT_ID=<your tenant ID>' \
+  --env 'AZURE_CLIENT_ID=<your AppId>' \
+  fedora-cloud-tests:latest
+```
 
 ## Prerequisites
 
