@@ -14,7 +14,7 @@ requires-python = ">=3.10"
 dependencies = [
     "fedora-messaging",
     "fedora-image-uploader-messages",
-    "lisa[azure] @ git+https://github.com/microsoft/lisa.git@20250819.1",
+    "lisa[azure]",
 ]
 
 test = [
