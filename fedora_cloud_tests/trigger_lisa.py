@@ -66,7 +66,7 @@ class LisaRunner:
                 "lisa",
                 "-r", "microsoft/runbook/azure_fedora.yml",
                 "-v", "tier:1",
-                "-v", "test_case_name:verify_dhcp_file_configuration",
+                "-v", "test_case_name:verify_boot_error_fail_warnings",
             ]
             for var in variables:
                 command.extend(["-v", var])
@@ -88,23 +88,22 @@ class LisaRunner:
 
             _log.info("Starting LISA test with command: %s", " ".join(command))
             process = await asyncio.create_subprocess_exec(
-                *command, stdout=subprocess.PIPE, stderr=subprocess.PIPE
+                *command,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT
             )
-            stdout, stderr = await process.communicate()
+            async for line in process.stdout:
+                line_content = line.decode().strip()
+                if line_content:  # Only log non-empty lines
+                    _log.info("LISA OUTPUT: %s ", line_content)
+
+            await process.wait()
+            # stderr = await process.communicate()
 
             if process.returncode == 0:
-                _log.info(
-                    "LISA test completed successfully with output %s.",
-                    stdout.decode(),
-                )
-                if stderr:
-                    _log.info("LISA test has warnings: %s", stderr.decode())
+                _log.info("LISA test completed successfully")
                 return True
-            _log.error("Triggering LISA tests failed %d", process.returncode)
-            if stdout:
-                _log.error("Standard Output: %s", stdout.decode())
-            if stderr:
-                _log.error("Standard Error: %s", stderr.decode())
+            _log.error("LISA test failed with return code: %d", process.returncode)
             return False
         except Exception as e:  # pylint: disable=broad-except
             _log.error("An error occurred while running the tests: %s", str(e))

@@ -9,9 +9,8 @@ image with the results.
 import asyncio
 import logging
 import os
-from datetime import datetime
-import tempfile
-import shutil
+from datetime import datetime, timezone
+from tempfile import TemporaryDirectory
 import xml.etree.ElementTree as ET
 
 from fedora_image_uploader_messages.publish import AzurePublishedV1
@@ -72,45 +71,6 @@ class AzurePublishedConsumer:
             _log.error("Message body does not have 'image_definition_name' field.")
             return None
 
-    def _generate_test_log_path(self, image_definition_name):
-        """
-        Generate test log path and run time name for the lisa tests.
-
-        Args:
-            image_definition_name (str): The name of the image definition.
-
-        Returns:
-            str: The generated log path.
-            str: The run time name for the LISA tests.
-        """
-
-        run_name = None
-
-        # Create temporary directory to store the test results
-        try:
-            log_path = tempfile.mkdtemp(
-                prefix=f"lisa_results_{image_definition_name}",
-                suffix="_logs"
-            )
-            _log.info("Temporary log path created: %s", log_path)
-        except Exception as e:  # pylint: disable=broad-except
-            _log.error("Failed to create temporary log path: %s", str(e))
-            raise
-
-        # Create custom run name with current date and time stamp
-        try:
-            current_date = datetime.now()
-            month_day = current_date.strftime("%B%d")
-            year = current_date.strftime("%Y")
-            time_str = current_date.strftime("%H%M")
-            run_name = f"{month_day}-{year}-{time_str}"
-            _log.info("Run name generated: %s", run_name)
-        except Exception as e:  # pylint: disable=broad-except
-            _log.error("Failed to generate run name: %s", str(e))
-            raise
-
-        return log_path, run_name
-
     def get_community_gallery_image(self, message):
         """Extract community gallery image from the messages."""
         _log.info(
@@ -158,7 +118,7 @@ class AzurePublishedConsumer:
             )
             return community_gallery_image
 
-        except Exception as e:  # pylint: disable=broad-except
+        except AttributeError as e:
             _log.error(
                 "Failed to extract image details from the message: %s", str(e)
             )
@@ -171,55 +131,64 @@ class AzurePublishedConsumer:
         try:
             if isinstance(message, AzurePublishedV1):
                 _log.info("Message properties match AzurePublishedV1 schema.")
-        except Exception as e:  # pylint: disable=broad-except
+        except TypeError as e:
             _log.error(
                 "Message properties do not match AzurePublishedV1 schema: %s", str(e)
             )
 
         community_gallery_image = self.get_community_gallery_image(message)
 
+        if not community_gallery_image:
+            _log.error(
+                "Unsupported or No community gallery image found in the message.")
+            return
+
+        image_definition_name = self._get_image_definition_name(message)
+
+        # Generate run name with UTC format
+        run_name = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%MZ")
+        _log.info("Run name generated: %s", run_name)
+
         try:
-            if not community_gallery_image:
-                _log.error(
-                    "Unsupported or No community gallery image found in the message."
-                )
-                return
-            log_path, run_name = self._generate_test_log_path(
-                self._get_image_definition_name(message))
-            _log.info("Test log path generated: %s", log_path)
-            config_params = {
-                "subscription": self.conf["subscription_id"],
-                "private_key": PRIVATE_KEY,
-                "log_path": log_path,
-                "run_name": run_name,
-            }
-            runner = LisaRunner()
-            ret = asyncio.run(
-                runner.trigger_lisa(
-                    region=self.conf["region"],
-                    community_gallery_image=community_gallery_image,
-                    config=config_params
-                )
-            )
-            if ret == 0:
-                _log.info("LISA trigger executed successfully.")
-                test_results = self._parse_test_results(log_path, run_name)
-                _log.info("Test execution completed with results: %s", test_results)
-                # To Do: Implement sending the results using publisher
-            else:
-                _log.error("LISA trigger failed with return code: %d", ret)
+            # Use TemporaryDirectory context manager for auto cleanup at the end of
+            # the test run
+            with TemporaryDirectory(
+                prefix=f"lisa_results_{image_definition_name}_",
+                suffix="_logs"
+            ) as log_path:
+                _log.info("Temporary log path created: %s", log_path)
 
-        except Exception as e:  # pylint: disable=broad-except
+                config_params = {
+                    "subscription": self.conf["subscription_id"],
+                    "private_key": PRIVATE_KEY,
+                    "log_path": log_path,
+                    "run_name": run_name,
+                }
+                _log.info("LISA config parameters: %s", config_params)
+                _log.info("Triggering tests for image: %s", community_gallery_image)
+                runner = LisaRunner()
+                ret = asyncio.run(
+                    runner.trigger_lisa(
+                        region=self.conf["region"],
+                        community_gallery_image=community_gallery_image,
+                        config=config_params
+                    )
+                )
+                _log.info("LISA trigger completed with return code: %d", ret)
+                if ret == 0:
+                    _log.info("LISA trigger executed successfully.")
+                    test_results = self._parse_test_results(log_path, run_name)
+                    if test_results is not None:
+                        _log.info("Test execution completed with results: %s", test_results)
+                        # To Do: Implement sending the results using publisher
+                    else:
+                        _log.error("Failed to parse test results, skipping image")
+                else:
+                    _log.error("LISA trigger failed with return code: %d", ret)
+                # TemporaryDirectory automatically cleans up when exiting the context
+
+        except OSError as e:
             _log.exception("Failed to trigger LISA: %s", str(e))
-
-        finally:
-            # Cleanup of the temporary directory created for logs
-            if log_path and os.path.exists(log_path):
-                try:
-                    shutil.rmtree(log_path)
-                    _log.info("Cleaned up temporary log path: %s", log_path)
-                except Exception as e:  # pylint: disable=broad-except
-                    _log.error("Failed to clean up log path %s: %s", log_path, str(e))
 
     def _parse_test_results(self, log_path, run_name):
         """
@@ -230,20 +199,13 @@ class AzurePublishedConsumer:
         Returns:
             dict: Dictionary containing test results with keys:
                   'total_tests', 'passed', 'failed', 'skipped', 'errors'
+            None: If parsing fails and results cannot be determined
         """
-        default_results = {
-            'total_tests': 0,
-            'passed': 0,
-            'failed': 0,
-            'skipped': 0,
-            'errors': 0,
-        }
-
         # Find and validate XML file
         xml_file = self._find_xml_file(log_path, run_name)
         if not xml_file or not os.path.exists(xml_file):
             _log.error("No XML file found in the log path: %s", log_path)
-            return default_results
+            return None
 
         _log.info("Found XML file: %s", xml_file)
 
@@ -255,16 +217,13 @@ class AzurePublishedConsumer:
 
             counters = self._extract_test_counters(root)
             if counters is None:
-                return default_results
+                return None
 
             return self._calculate_final_results(counters)
 
-        except (ET.ParseError, ValueError, TypeError) as e:
+        except ET.ParseError as e:
             _log.error("Failed to parse XML file %s: %s", xml_file, str(e))
-            return default_results
-        except Exception as e:  # pylint: disable=broad-except
-            _log.error("Unexpected error while processing XML file %s: %s", xml_file, str(e))
-            return default_results
+            return None
 
     def _extract_test_counters(self, root):
         """
@@ -276,36 +235,25 @@ class AzurePublishedConsumer:
         Returns:
             dict: Test counters or None if extraction fails
         """
+        if root.tag not in ("testsuite", "testsuites"):
+            _log.error("Unexpected XML root element: %s", root.tag)
+            return None
+
         counters = {'total_tests': 0, 'failures': 0, 'errors': 0, 'skipped': 0}
 
-        try:
-            if root.tag == "testsuites":
-                # Try to get values from root first
+        # Extract counters from root element
+        for key, attr in [('total_tests', 'tests'), ('failures', 'failures'),
+                         ('errors', 'errors'), ('skipped', 'skipped')]:
+            attr_value = root.attrib.get(attr, '0')
+            counters[key] = int(attr_value) if attr_value.isdigit() else 0
+
+        # If root doesn't have values and it's testsuites, sum from individual test suites
+        if counters['total_tests'] == 0 and root.tag != 'testsuite':
+            for suite in root.findall("testsuite"):
                 for key, attr in [('total_tests', 'tests'), ('failures', 'failures'),
                                  ('errors', 'errors'), ('skipped', 'skipped')]:
-                    attr_value = root.attrib.get(attr, '0')
-                    counters[key] = int(attr_value) if attr_value.isdigit() else 0
-
-                # If root doesn't have values, sum from individual test suites
-                if counters['total_tests'] == 0:
-                    for suite in root.findall("testsuite"):
-                        for key, attr in [('total_tests', 'tests'), ('failures', 'failures'),
-                                         ('errors', 'errors'), ('skipped', 'skipped')]:
-                            attr_value = suite.attrib.get(attr, '0')
-                            counters[key] += int(attr_value) if attr_value.isdigit() else 0
-
-            elif root.tag == 'testsuite':
-                for key, attr in [('total_tests', 'tests'), ('failures', 'failures'),
-                                 ('errors', 'errors'), ('skipped', 'skipped')]:
-                    attr_value = root.attrib.get(attr, '0')
-                    counters[key] = int(attr_value) if attr_value.isdigit() else 0
-            else:
-                _log.warning("Unexpected XML root element: %s", root.tag)
-                return None
-
-        except (ValueError, TypeError, AttributeError) as e:
-            _log.error("Error extracting test counters from XML: %s", str(e))
-            return None
+                    attr_value = suite.attrib.get(attr, '0')
+                    counters[key] += int(attr_value) if attr_value.isdigit() else 0
 
         return counters
 
@@ -319,30 +267,20 @@ class AzurePublishedConsumer:
         Returns:
             dict: Final test results with calculated passed tests
         """
-        try:
-            failed_total = counters['failures'] + counters['errors']
-            passed_tests = max(0, counters['total_tests'] - failed_total - counters['skipped'])
+        failed_total = counters['failures'] + counters['errors']
+        passed_tests = max(0, counters['total_tests'] - failed_total - counters['skipped'])
 
-            _log.info("Parsed test results - Total: %d, Passed: %d, Failed: %d, Errors: %d, Skipped: %d",
-                      counters['total_tests'], passed_tests, counters['failures'],
-                      counters['errors'], counters['skipped'])
+        _log.info("Parsed test results - Total: %d, Passed: %d, Failed: %d, Errors: %d, Skipped: %d",
+                  counters['total_tests'], passed_tests, counters['failures'],
+                  counters['errors'], counters['skipped'])
 
-            return {
-                'total_tests': counters['total_tests'],
-                'passed': passed_tests,
-                'failed': counters['failures'],
-                'skipped': counters['skipped'],
-                'errors': counters['errors']
-            }
-        except (KeyError, TypeError) as e:
-            _log.error("Error calculating test results from counters: %s", str(e))
-            return {
-                'total_tests': 0,
-                'passed': 0,
-                'failed': 0,
-                'skipped': 0,
-                'errors': 0,
-            }
+        return {
+            'total_tests': counters['total_tests'],
+            'passed': passed_tests,
+            'failed': counters['failures'],
+            'skipped': counters['skipped'],
+            'errors': counters['errors']
+        }
 
     def _find_xml_file(self, log_path, run_name):
         """
@@ -368,8 +306,8 @@ class AzurePublishedConsumer:
                         xml_file_path = os.path.join(root, filename)
                         _log.info("Found XML file at: %s", xml_file_path)
                         return xml_file_path
-        except Exception as e:  # pylint: disable=broad-except
-            _log.error("Error while searching for XML file in %s: %s", xml_path, str(e))
+        except OSError as e:
+            _log.error("Error while searching for XML file in %s: %s ", xml_path, str(e))
 
         _log.warning("No XML file with suffix 'lisa.junit.xml' found in %s", xml_path)
         return None
