@@ -14,11 +14,14 @@ from tempfile import TemporaryDirectory
 import xml.etree.ElementTree as ET
 
 from fedora_image_uploader_messages.publish import AzurePublishedV1
-from fedora_messaging import config
+from fedora_messaging import config, api
+from fedora_messaging.exceptions import ValidationError, PublishTimeout, ConnectionException
+
+from fedora_cloud_tests.publish import AzureImageResultsPublished
 
 from .trigger_lisa import LisaRunner
 
-PRIVATE_KEY = ""  # Path to the private key file for Azure authentication
+PRIVATE_KEY = "/home/bala/.ssh/id_rsa"  # Path to the private key file for Azure authentication
 
 _log = logging.getLogger(__name__)
 
@@ -181,6 +184,7 @@ class AzurePublishedConsumer:
                     if test_results is not None:
                         _log.info("Test execution completed with results: %s", test_results)
                         # To Do: Implement sending the results using publisher
+                        self.publish_test_results(message, test_results)
                     else:
                         _log.error("Failed to parse test results, skipping image")
                 else:
@@ -189,6 +193,102 @@ class AzurePublishedConsumer:
 
         except OSError as e:
             _log.exception("Failed to trigger LISA: %s", str(e))
+
+    def publish_test_results(self, message, test_results):
+        """
+        Publish the test results using AzureImageResultsPublished publisher.
+        
+        Following fedora-image-uploader patterns for message publishing.
+        """
+        try:
+            # Extract metadata from original message
+            body = self._build_result_message_body(message, test_results)
+
+            # Create message instance with body (following fedora-messaging patterns)
+            result_message = AzureImageResultsPublished(body=body)
+
+            _log.info("Publishing test results for image: %s", body.get("image_definition_name"))
+            _log.debug("Full message body: %s", body)
+
+            # Publish message using fedora-messaging API
+            api.publish(result_message)
+
+            _log.info("Successfully published test results for %s",
+                     body.get("image_definition_name"))
+
+        except ValidationError as e:
+            _log.error("Message validation failed: %s", str(e))
+            _log.error("Invalid message body: %s", body)
+        except (PublishTimeout, ConnectionException) as e:
+            _log.error("Failed to publish test results due to connectivity: %s", str(e))
+        except (OSError, KeyError, TypeError) as e:
+            _log.error("Unexpected error during publishing: %s", str(e))
+
+    def _build_result_message_body(self, original_message, test_results):
+        """
+        Build the message body for test results publication.
+        
+        Args:
+            original_message: The original AzurePublishedV1 message
+            test_results: Parsed test results dictionary
+            
+        Returns:
+            dict: Message body for AzureImageResultsPublished
+        """
+        # Extract image metadata from original message
+        body = original_message.body
+
+        # Build the result message body following the schema
+        result_body = {
+            # Image identification
+            "architecture": self._extract_architecture(body),
+            "compose_id": self._extract_compose_id(body),
+            "image_id": body.get("image_definition_name"),  # Use definition name as image ID
+            "image_definition_name": body.get("image_definition_name"),
+            "image_resource_id": body.get("image_resource_id"),
+
+            # Test result summary
+            "total_tests": test_results.get("total_tests", 0),
+            "passed_tests": test_results.get("passed", 0),
+            "failed_tests": test_results.get("failed", 0),
+            "skipped_tests": test_results.get("skipped", 0),
+
+            # Detailed test lists
+            "list_of_failed_tests": test_results.get("failed_test_names", []),
+            "list_of_skipped_tests": test_results.get("skipped_test_names", []),
+            "list_of_passed_tests": test_results.get("passed_test_names", [])
+        }
+
+        return result_body
+
+    def _extract_architecture(self, message_body):
+        """Extract architecture from image definition name."""
+        image_def = message_body.get("image_definition_name", "")
+        if "x64" in image_def:
+            return "x86_64"
+        if "Arm64" in image_def:
+            return "aarch64"
+        return "unknown"
+
+    def _extract_compose_id(self, message_body):
+        """Extract compose ID from image version name."""
+        # Image version typically follows pattern: YYYYMMDD.n.0
+        # Convert to compose format: Fedora-{Release}-YYYYMMDD.n.0
+        image_version = message_body.get("image_version_name", "")
+        image_def = message_body.get("image_definition_name", "")
+
+        # Extract release from image definition (e.g., "Fedora-Cloud-Rawhide-x64" -> "Rawhide")
+        if "Rawhide" in image_def:
+            release = "Rawhide"
+        elif "41" in image_def:
+            release = "41"
+        elif "42" in image_def:
+            release = "42"
+        else:
+            release = "Unknown"
+
+        return f"Fedora-{release}-{image_version}"
+
 
     def _parse_test_results(self, log_path, run_name):
         """
@@ -219,7 +319,11 @@ class AzurePublishedConsumer:
             if counters is None:
                 return None
 
-            return self._calculate_final_results(counters)
+            # Extract individual test details
+            test_details = self._extract_test_details(root)
+            final_results = self._calculate_final_results(counters, test_details)
+
+            return final_results
 
         except ET.ParseError as e:
             _log.error("Failed to parse XML file %s: %s", xml_file, str(e))
@@ -257,15 +361,62 @@ class AzurePublishedConsumer:
 
         return counters
 
-    def _calculate_final_results(self, counters):
+    def _extract_test_details(self, root):
+        """
+        Extract individual test case details from XML.
+        
+        Args:
+            root: XML root element (either 'testsuites' or 'testsuite')
+            
+        Returns:
+            dict: Dictionary with lists of test names categorized by status:
+                  {'passed': [...], 'failed': [...], 'skipped': [...]}
+        """
+        test_details = {
+            'passed': [],
+            'failed': [],
+            'skipped': []
+        }
+
+        test_suites = root.findall("testsuite") if root.tag == "testsuites" else [root]
+
+        # Iterate through test suites and test cases
+        for suite in test_suites:
+            suite_name = suite.attrib.get('name', 'unknown_suite')
+
+            for testcase in suite.findall('testcase'):
+                test_name = testcase.attrib.get('name', 'unknown_test')
+
+                # Create a descriptive test identifier
+                test_identifier = f"{suite_name}.{test_name}"
+
+                # Check test status based on child elements
+                if testcase.find('failure') is not None:
+                    test_details['failed'].append(test_identifier)
+                elif testcase.find('error') is not None:
+                    test_details['failed'].append(test_identifier)  # Treat errors as failures
+                elif testcase.find('skipped') is not None:
+                    test_details['skipped'].append(test_identifier)
+                else:
+                    test_details['passed'].append(test_identifier)
+
+        _log.info("Extracted test details - Passed: %d, Failed: %d, Skipped: %d",
+                  len(test_details['passed']),
+                  len(test_details['failed']),
+                  len(test_details['skipped']))
+
+        return test_details
+
+    def _calculate_final_results(self, counters, test_details=None):
         """
         Calculate final test results from counters.
         
         Args:
             counters (dict): Dictionary with test count data
+            test_details (dict, optional): Dictionary with test name lists
             
         Returns:
-            dict: Final test results with calculated passed tests
+            dict: Final test results with calculated passed tests and optional test lists
         """
         failed_total = counters['failures'] + counters['errors']
         passed_tests = max(0, counters['total_tests'] - failed_total - counters['skipped'])
@@ -274,13 +425,23 @@ class AzurePublishedConsumer:
                   counters['total_tests'], passed_tests, counters['failures'],
                   counters['errors'], counters['skipped'])
 
-        return {
+        results = {
             'total_tests': counters['total_tests'],
             'passed': passed_tests,
             'failed': counters['failures'],
             'skipped': counters['skipped'],
             'errors': counters['errors']
         }
+
+        # Add test name lists if provided
+        if test_details:
+            results.update({
+                'failed_test_names': test_details['failed'],
+                'skipped_test_names': test_details['skipped'],
+                'passed_test_names': test_details['passed']
+            })
+
+        return results
 
     def _find_xml_file(self, log_path, run_name):
         """

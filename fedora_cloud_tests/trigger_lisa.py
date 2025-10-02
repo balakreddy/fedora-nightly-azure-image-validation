@@ -66,7 +66,7 @@ class LisaRunner:
                 "lisa",
                 "-r", "microsoft/runbook/azure_fedora.yml",
                 "-v", "tier:1",
-                "-v", "test_case_name:verify_boot_error_fail_warnings",
+                "-v", "test_case_name:verify_dhcp_file_configuration",
             ]
             for var in variables:
                 command.extend(["-v", var])

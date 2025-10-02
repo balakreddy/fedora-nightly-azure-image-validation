@@ -1,6 +1,6 @@
 """Unit tests for the LisaRunner class in trigger_lisa.py."""
 
-import asyncio
+import subprocess
 from unittest.mock import patch, MagicMock, AsyncMock
 import pytest
 from fedora_cloud_tests import trigger_lisa
@@ -10,6 +10,34 @@ from fedora_cloud_tests import trigger_lisa
 def runner():
     """Create a LisaRunner instance for testing."""
     return trigger_lisa.LisaRunner()
+
+
+@pytest.fixture
+def test_setup(runner, region, community_gallery_image, config_params):
+    """Create a test setup object combining common fixtures."""
+    return {
+        'runner': runner,
+        'region': region,
+        'community_gallery_image': community_gallery_image,
+        'config_params': config_params
+    }
+
+
+@pytest.fixture
+def mock_process():
+    """Create a properly mocked async subprocess for testing."""
+    process = MagicMock()
+    process.returncode = 0
+    process.wait = AsyncMock()
+
+    # Mock stdout as an async iterator
+    async def mock_stdout_lines():
+        lines = [b"LISA test output line 1\n", b"LISA test output line 2\n"]
+        for line in lines:
+            yield line
+
+    process.stdout = mock_stdout_lines()
+    return process
 
 
 @pytest.fixture
@@ -39,43 +67,33 @@ class TestLisaRunner:
     """Test class for LisaRunner."""
 
     @pytest.mark.asyncio
-    async def test_trigger_lisa_success(self, runner, region, community_gallery_image, config_params):
+    async def test_trigger_lisa_success(self, test_setup, mock_process):
         """Test successful execution of the trigger_lisa method."""
         with patch("asyncio.create_subprocess_exec") as mock_subproc_exec:
-            mock_process = MagicMock()
-            mock_process.returncode = 0
-            mock_process.communicate = AsyncMock(return_value=(b"success output", b""))
             mock_subproc_exec.return_value = mock_process
 
-            result = await runner.trigger_lisa(
-                region, community_gallery_image, config_params
+            result = await test_setup['runner'].trigger_lisa(
+                test_setup['region'], test_setup['community_gallery_image'], test_setup['config_params']
             )
 
             assert result is True
             mock_subproc_exec.assert_called_once()
-            mock_process.communicate.assert_called_once()
+            mock_process.wait.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_trigger_lisa_success_with_warnings(self, runner, region, community_gallery_image, config_params):
-        """Test successful execution with warnings in stderr."""
+    async def test_trigger_lisa_success_with_warnings(self, test_setup, mock_process):
+        """Test successful execution with output."""
         with patch("asyncio.create_subprocess_exec") as mock_subproc_exec:
-            mock_process = MagicMock()
-            mock_process.returncode = 0
-            mock_process.communicate = AsyncMock(
-                return_value=(b"success output", b"warning message")
-            )
             mock_subproc_exec.return_value = mock_process
 
             with patch.object(trigger_lisa._log, "info") as mock_logger_info:
-                result = await runner.trigger_lisa(
-                    region, community_gallery_image, config_params
+                result = await test_setup['runner'].trigger_lisa(
+                    test_setup['region'], test_setup['community_gallery_image'], test_setup['config_params']
                 )
 
                 assert result is True
-                # Check that warning was logged
-                mock_logger_info.assert_any_call(
-                    "LISA test has warnings: %s", "warning message"
-                )
+                # Check that LISA output was logged
+                mock_logger_info.assert_any_call("LISA OUTPUT: %s ", "LISA test output line 1")
 
     @pytest.mark.asyncio
     async def test_trigger_lisa_failure_non_zero_return_code(self, runner, region, community_gallery_image, config_params):
@@ -83,9 +101,15 @@ class TestLisaRunner:
         with patch("asyncio.create_subprocess_exec") as mock_subproc_exec:
             mock_process = MagicMock()
             mock_process.returncode = 1
-            mock_process.communicate = AsyncMock(
-                return_value=(b"error output", b"error stderr")
-            )
+            mock_process.wait = AsyncMock()
+
+            # Mock stdout as an async iterator with error output
+            async def mock_stdout_lines():
+                lines = [b"Error: LISA test failed\n", b"Additional error details\n"]
+                for line in lines:
+                    yield line
+
+            mock_process.stdout = mock_stdout_lines()
             mock_subproc_exec.return_value = mock_process
 
             with patch.object(trigger_lisa._log, "error") as mock_logger_error:
@@ -94,9 +118,7 @@ class TestLisaRunner:
                 )
 
                 assert result is False
-                mock_logger_error.assert_any_call("Triggering LISA tests failed %d", 1)
-                mock_logger_error.assert_any_call("Standard Output: %s", "error output")
-                mock_logger_error.assert_any_call("Standard Error: %s", "error stderr")
+                mock_logger_error.assert_any_call("LISA test failed with return code: %d", 1)
 
     @pytest.mark.asyncio
     async def test_trigger_lisa_exception_handling(self, runner, region, community_gallery_image, config_params):
@@ -171,16 +193,13 @@ class TestLisaRunner:
             )
 
     @pytest.mark.asyncio
-    async def test_trigger_lisa_command_construction(self, runner, region, community_gallery_image, config_params):
+    async def test_trigger_lisa_command_construction(self, test_setup, mock_process):
         """Test that the LISA command is constructed correctly."""
         with patch("asyncio.create_subprocess_exec") as mock_subproc_exec:
-            mock_process = MagicMock()
-            mock_process.returncode = 0
-            mock_process.communicate = AsyncMock(return_value=(b"success", b""))
             mock_subproc_exec.return_value = mock_process
 
-            await runner.trigger_lisa(
-                region, community_gallery_image, config_params
+            await test_setup['runner'].trigger_lisa(
+                test_setup['region'], test_setup['community_gallery_image'], test_setup['config_params']
             )
 
             # Verify the command was called with correct arguments
@@ -193,27 +212,27 @@ class TestLisaRunner:
                 "-v",
                 "test_case_name:verify_dhcp_file_configuration",
                 "-v",
-                f"region:{region}",
+                f"region:{test_setup['region']}",
                 "-v",
-                f"community_gallery_image:{community_gallery_image}",
+                f"community_gallery_image:{test_setup['community_gallery_image']}",
                 "-v",
-                f"subscription_id:{config_params['subscription']}",
+                f"subscription_id:{test_setup['config_params']['subscription']}",
                 "-v",
-                f"admin_private_key_file:{config_params['private_key']}",
+                f"admin_private_key_file:{test_setup['config_params']['private_key']}",
                 "-l",
-                config_params["log_path"],
+                test_setup['config_params']["log_path"],
                 "-i",
-                config_params["run_name"],
+                test_setup['config_params']["run_name"],
             ]
 
             mock_subproc_exec.assert_called_once_with(
                 *expected_command,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
             )
 
     @pytest.mark.asyncio
-    async def test_trigger_lisa_missing_optional_config_parameters(self, runner, region, community_gallery_image):
+    async def test_trigger_lisa_missing_optional_config_parameters(self, runner, region, community_gallery_image, mock_process):
         """Test successful execution when optional config parameters 
         (log_path, run_name) are missing."""
         minimal_config = {
@@ -223,9 +242,6 @@ class TestLisaRunner:
         }
 
         with patch("asyncio.create_subprocess_exec") as mock_subproc_exec:
-            mock_process = MagicMock()
-            mock_process.returncode = 0
-            mock_process.communicate = AsyncMock(return_value=(b"success", b""))
             mock_subproc_exec.return_value = mock_process
 
             result = await runner.trigger_lisa(
@@ -246,7 +262,7 @@ class TestLisaRunner:
             assert "microsoft/runbook/azure_fedora.yml" in command_list
 
     @pytest.mark.asyncio
-    async def test_trigger_lisa_with_optional_config_parameters(self, runner, region, community_gallery_image):
+    async def test_trigger_lisa_with_optional_config_parameters(self, runner, region, community_gallery_image, mock_process):
         """Test successful execution when optional config parameters are provided."""
         config_with_optionals = {
             "subscription": "test-subscription",
@@ -256,9 +272,6 @@ class TestLisaRunner:
         }
 
         with patch("asyncio.create_subprocess_exec") as mock_subproc_exec:
-            mock_process = MagicMock()
-            mock_process.returncode = 0
-            mock_process.communicate = AsyncMock(return_value=(b"success", b""))
             mock_subproc_exec.return_value = mock_process
 
             result = await runner.trigger_lisa(
