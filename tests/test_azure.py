@@ -1,5 +1,8 @@
 """Unit tests for the AzurePublishedConsumer class in azure.py."""
 
+import os
+import subprocess
+from tempfile import TemporaryDirectory
 from unittest.mock import patch, MagicMock, Mock
 
 import pytest
@@ -78,43 +81,48 @@ class TestAzurePublishedConsumer:
         del message.body
         assert consumer._get_image_definition_name(message) is None
 
-    def test_generate_test_log_path(self, consumer):
-        """Test log path and run name generation with different configurations."""
-        # Test with custom settings enabled
-        with patch('fedora_cloud_tests.azure.CUSTOM_LOG_PATH', True):
-            with patch('fedora_cloud_tests.azure.CUSTOM_RUN_NAME', True):
-                with patch('os.path.expanduser', return_value="/home/user/lisa_results"):
-                    with patch('os.makedirs'):
-                        log_path, run_name = consumer._generate_test_log_path("Fedora-Cloud-Rawhide-x64")
-                        assert log_path == "/home/user/lisa_results/Fedora-Cloud-Rawhide-x64"
-                        assert run_name is not None
-                        assert isinstance(run_name, str)
+    @patch('fedora_cloud_tests.azure.subprocess.run')
+    @patch('os.chmod')
+    def test_generate_ssh_key_pair_success(self, mock_chmod, mock_subprocess, consumer):
+        """Test successful SSH key pair generation."""
+        # Mock subprocess.run to simulate successful ssh-keygen
+        mock_subprocess.return_value = MagicMock(stdout="Key generated successfully")
 
-        # Test with custom settings disabled
-        with patch('fedora_cloud_tests.azure.CUSTOM_LOG_PATH', False):
-            with patch('fedora_cloud_tests.azure.CUSTOM_RUN_NAME', False):
-                log_path, run_name = consumer._generate_test_log_path("Fedora-Cloud-Rawhide-x64")
-                assert log_path is None
-                assert run_name is None
+        with TemporaryDirectory() as temp_dir:
+            with patch('os.path.exists', return_value=True):
+                result = consumer._generate_ssh_key_pair(temp_dir)
 
-    def test_generate_test_log_path_error_handling(self, consumer):
-        """Test error handling during log path creation and run name generation."""
-        # Test log path creation failure
-        with patch('fedora_cloud_tests.azure.CUSTOM_LOG_PATH', True):
-            with patch('fedora_cloud_tests.azure.CUSTOM_RUN_NAME', False):
-                with patch('os.makedirs', side_effect=OSError("Permission denied")):
-                    log_path, run_name = consumer._generate_test_log_path("test-image")
-                    assert log_path is None
-                    assert run_name is None
+                # Verify the method returns the expected private key path
+                expected_path = os.path.join(temp_dir, "id_rsa")
+                assert result == expected_path
 
-        # Test run name generation failure
-        with patch('fedora_cloud_tests.azure.CUSTOM_LOG_PATH', False):
-            with patch('fedora_cloud_tests.azure.CUSTOM_RUN_NAME', True):
-                with patch('fedora_cloud_tests.azure.datetime') as mock_datetime:
-                    mock_datetime.now.side_effect = Exception("Time error")
-                    log_path, run_name = consumer._generate_test_log_path("test-image")
-                    assert log_path is None
-                    assert run_name is None
+                # Verify ssh-keygen was called with correct parameters
+                mock_subprocess.assert_called_once()
+                call_args = mock_subprocess.call_args[0][0]
+                assert "ssh-keygen" in call_args
+                assert "-t" in call_args and "rsa" in call_args
+                assert "-f" in call_args
+
+                # Verify file permissions were set
+                mock_chmod.assert_called_once_with(expected_path, 0o600)
+
+    @patch('fedora_cloud_tests.azure.subprocess.run')
+    def test_generate_ssh_key_pair_failures(self, mock_subprocess, consumer):
+        """Test SSH key pair generation failure cases."""
+        with TemporaryDirectory() as temp_dir:
+            # Test subprocess failure
+            mock_subprocess.side_effect = subprocess.CalledProcessError(1, 'ssh-keygen')
+            result = consumer._generate_ssh_key_pair(temp_dir)
+            assert result is None
+
+            # Reset mock for next test
+            mock_subprocess.side_effect = None
+            mock_subprocess.return_value = MagicMock(stdout="Key generated")
+
+            # Test file not created scenario
+            with patch('os.path.exists', return_value=False):
+                result = consumer._generate_ssh_key_pair(temp_dir)
+                assert result is None
 
     def test_get_community_gallery_image_success(self, consumer, valid_message):
         """Test successful community gallery image construction."""
@@ -161,10 +169,12 @@ class TestAzurePublishedConsumer:
 
     @patch('fedora_cloud_tests.azure.asyncio.run')
     @patch('fedora_cloud_tests.azure.LisaRunner')
-    def test_azure_published_callback_success(self, mock_lisa_runner, mock_asyncio_run, consumer, valid_message):
+    @patch.object(AzurePublishedConsumer, '_generate_ssh_key_pair')
+    def test_azure_published_callback_success(self, mock_ssh_keygen, mock_lisa_runner, mock_asyncio_run, consumer, valid_message):  # pylint: disable=R0913,R0917
         """Test successful message processing and LISA trigger."""
         mock_runner_instance = MagicMock()
         mock_lisa_runner.return_value = mock_runner_instance
+        mock_ssh_keygen.return_value = "/tmp/test_key"
 
         consumer.azure_published_callback(valid_message)
         mock_lisa_runner.assert_called_once_with()
@@ -182,22 +192,29 @@ class TestAzurePublishedConsumer:
         mock_lisa_runner.assert_not_called()
         mock_asyncio_run.assert_not_called()
 
-    @patch('fedora_cloud_tests.azure.asyncio.run', side_effect=Exception("LISA execution failed"))
+    @patch('fedora_cloud_tests.azure.asyncio.run', side_effect=OSError("LISA execution failed"))
     @patch('fedora_cloud_tests.azure.LisaRunner')
-    def test_azure_published_callback_lisa_exception(self, mock_lisa_runner, mock_asyncio_run, consumer, valid_message):
+    @patch.object(AzurePublishedConsumer, '_generate_ssh_key_pair')
+    def test_azure_published_callback_lisa_exception(self, mock_ssh_keygen, mock_lisa_runner, mock_asyncio_run, consumer, valid_message):  # pylint: disable=R0913,R0917
         """Test exception handling when LISA execution fails."""
         mock_runner_instance = MagicMock()
         mock_lisa_runner.return_value = mock_runner_instance
+        mock_ssh_keygen.return_value = "/tmp/test_key"
 
         # Should not raise exception, just log it
         consumer.azure_published_callback(valid_message)
         mock_asyncio_run.assert_called_once()
 
-    def test_azure_published_callback_message_validation_exception(self, consumer, valid_message):
+    def test_azure_published_callback_message_validation_exception(self, consumer):
         """Test exception handling during message type validation."""
-        with patch('fedora_cloud_tests.azure.isinstance', side_effect=Exception("Validation error")):
-            # Should not crash, just log the error and continue processing
-            consumer.azure_published_callback(valid_message)
+        # Create a message that will cause a TypeError during isinstance check
+        # by making it not a proper message type
+        invalid_message = Mock()
+        invalid_message.topic = "test.topic"
+        invalid_message.body = "not_a_dict"  # This will cause isinstance issues
+
+        # This should not crash but should log errors and return early
+        consumer.azure_published_callback(invalid_message)
 
     def test_call_method_delegates_to_callback(self, consumer, valid_message):
         """Test that __call__ method properly delegates to azure_published_callback."""

@@ -8,7 +8,7 @@ fedora-messaging registration.
 
 import pytest
 import jsonschema
-from fedora_cloud_tests.publish import BasePublished, AzureImageResultsPublished
+from fedora_cloud_tests_messages.publish import BasePublished, AzureImageResultsPublished
 
 
 class TestBasePublished:

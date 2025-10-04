@@ -10,6 +10,7 @@ import asyncio
 import logging
 import os
 from datetime import datetime, timezone
+import subprocess
 from tempfile import TemporaryDirectory
 import xml.etree.ElementTree as ET
 
@@ -17,11 +18,9 @@ from fedora_image_uploader_messages.publish import AzurePublishedV1
 from fedora_messaging import config, api
 from fedora_messaging.exceptions import ValidationError, PublishTimeout, ConnectionException
 
-from fedora_cloud_tests.publish import AzureImageResultsPublished
+from fedora_cloud_tests_messages.publish import AzureImageResultsPublished
 
 from .trigger_lisa import LisaRunner
-
-PRIVATE_KEY = "/home/bala/.ssh/id_rsa"  # Path to the private key file for Azure authentication
 
 _log = logging.getLogger(__name__)
 
@@ -161,9 +160,12 @@ class AzurePublishedConsumer:
             ) as log_path:
                 _log.info("Temporary log path created: %s", log_path)
 
+                # Generate SSH key pair for authentication
+                private_key = self._generate_ssh_key_pair(log_path)
+
                 config_params = {
                     "subscription": self.conf["subscription_id"],
-                    "private_key": PRIVATE_KEY,
+                    "private_key": private_key,
                     "log_path": log_path,
                     "run_name": run_name,
                 }
@@ -241,8 +243,8 @@ class AzurePublishedConsumer:
         # Build the result message body following the schema
         result_body = {
             # Image identification
-            "architecture": self._extract_architecture(body),
-            "compose_id": self._extract_compose_id(body),
+            "architecture": body.get("architecture"),
+            "compose_id": body.get("compose_id"),
             "image_id": body.get("image_definition_name"),  # Use definition name as image ID
             "image_definition_name": body.get("image_definition_name"),
             "image_resource_id": body.get("image_resource_id"),
@@ -260,35 +262,6 @@ class AzurePublishedConsumer:
         }
 
         return result_body
-
-    def _extract_architecture(self, message_body):
-        """Extract architecture from image definition name."""
-        image_def = message_body.get("image_definition_name", "")
-        if "x64" in image_def:
-            return "x86_64"
-        if "Arm64" in image_def:
-            return "aarch64"
-        return "unknown"
-
-    def _extract_compose_id(self, message_body):
-        """Extract compose ID from image version name."""
-        # Image version typically follows pattern: YYYYMMDD.n.0
-        # Convert to compose format: Fedora-{Release}-YYYYMMDD.n.0
-        image_version = message_body.get("image_version_name", "")
-        image_def = message_body.get("image_definition_name", "")
-
-        # Extract release from image definition (e.g., "Fedora-Cloud-Rawhide-x64" -> "Rawhide")
-        if "Rawhide" in image_def:
-            release = "Rawhide"
-        elif "41" in image_def:
-            release = "41"
-        elif "42" in image_def:
-            release = "42"
-        else:
-            release = "Unknown"
-
-        return f"Fedora-{release}-{image_version}"
-
 
     def _parse_test_results(self, log_path, run_name):
         """
@@ -472,3 +445,36 @@ class AzurePublishedConsumer:
 
         _log.warning("No XML file with suffix 'lisa.junit.xml' found in %s", xml_path)
         return None
+
+    def _generate_ssh_key_pair(self, temp_dir):
+        """
+        Generate an SSH key pair for authentication.
+
+        Args:
+            temp_dir (str): Directory to store the generated key pair.
+
+        Returns:
+            str: Path to the private key file. or None if generation fails.
+        """
+
+        private_key_path = os.path.join(temp_dir, "id_rsa")
+        public_key_path = os.path.join(temp_dir, "id_rsa.pub")
+
+        try:
+            # Generate SSH key pair using ssh-keygen
+            cmd = ["ssh-keygen", "-t", "rsa", "-b", "2048", "-f", private_key_path, "-N", ""]
+            ret = subprocess.run(cmd, check=True, capture_output=True, text=True)
+            _log.info("SSH key pair generated at: %s and %s", private_key_path, public_key_path)
+            _log.debug("ssh-keygen output: %s", ret.stdout)
+
+            # Verify the private key file is created
+            if not os.path.exists(private_key_path):
+                _log.error("SSH key generation succeeded but private key file was not found at: %s", private_key_path)
+                return None
+
+            # Set the permissions for the file
+            os.chmod(private_key_path, 0o600)
+            return private_key_path
+        except (subprocess.CalledProcessError, OSError) as e:
+            _log.error("Failed to generate SSH key pair: %s", str(e))
+            return None
