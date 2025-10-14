@@ -10,10 +10,10 @@ from fedora_messaging import message
 SCHEMA_URL = "http://fedoraproject.org/message-schema/v1"
 
 
-class BasePublished(message.Message):
+class BaseTestResults(message.Message):
     """Base class for fedora_cloud_tests published messages."""
 
-    topic = "org.fedoraproject.prod.fedora_cloud_tests.published.v1"
+    topic = "org.fedoraproject.prod.fedora_cloud_tests.test_results.v1"
 
     @property
     def app_name(self):
@@ -21,16 +21,42 @@ class BasePublished(message.Message):
         return "fedora_cloud_tests"
 
 
-class AzureImageResultsPublished(BasePublished):
+class AzureTestResults(BaseTestResults):
     """
     Published when an image is tested with LISA and results are available.
     """
-    topic = "".join([BasePublished.topic, ".azure"])
+    topic = ".".join([BaseTestResults.topic, "azure"])
 
     body_schema = {
-        "id": f"{SCHEMA_URL}/{'.'.join([BasePublished.topic, 'azure'])}.json",
+        "id": f"{SCHEMA_URL}/{topic}.json",
         "$schema": "http://json-schema.org/draft-07/schema#",
-        "Description": "Schema for Azure image test results published by fedora_cloud_tests against LISA",
+
+        # Using $defs and $ref for reusability of test results(passed, failed, skipped)
+        "$defs": {
+            "testResults": {
+                "type": "object",
+                "properties": {
+                    "count": {
+                        "type": "integer",
+                        "description": "Number of tests in this category",
+                    },
+                    "tests": {
+                        "type": "object",
+                        "patternProperties": {
+                            ".*": {
+                                "type": "string",
+                                "description": "Name of the test"
+                            }
+                        },
+                        "additionalProperties": False,
+                        "description": "Explanation for the test result (e.g., reason for skip or failure)"
+                    }
+                },
+                "required": ["count", "tests"],
+                "additionalProperties": False
+            }
+        },
+        "description": "Schema for Azure image test results published by fedora_cloud_tests against LISA",
         "type": "object",
         "properties": {
             "architecture": {"type": "string"},
@@ -38,25 +64,10 @@ class AzureImageResultsPublished(BasePublished):
             "image_id": {"type": "string"},
             "image_definition_name": {"type": "string"},
             "image_resource_id": {"type": "string"},
-            "total_tests": {"type": "integer", "minimum": 0, "maximum": 750},
-            "passed_tests": {"type": "integer", "minimum": 0, "maximum": 250},
-            "failed_tests": {"type": "integer", "minimum": 0, "maximum": 250},
-            "skipped_tests": {"type": "integer", "minimum": 0, "maximum": 250},
-            "list_of_failed_tests": {
-                "type": "array",
-                "items": {"type": "string", "maxLength": 200},
-                "maxItems": 250
-            },
-            "list_of_skipped_tests": {
-                "type": "array", 
-                "items": {"type": "string", "maxLength": 200},
-                "maxItems": 250
-            },
-            "list_of_passed_tests": {
-                "type": "array",
-                "items": {"type": "string", "maxLength": 200},
-                "maxItems": 250
-            }
+            # References to reusable test results schema
+            "list_of_failed_tests": {"$ref": "#/$defs/testResults"},
+            "list_of_skipped_tests": {"$ref": "#/$defs/testResults"},
+            "list_of_passed_tests": {"$ref": "#/$defs/testResults"}
         },
         "required": [
             "architecture",
@@ -64,10 +75,6 @@ class AzureImageResultsPublished(BasePublished):
             "image_id",
             "image_definition_name",
             "image_resource_id",
-            "total_tests",
-            "passed_tests",
-            "failed_tests",
-            "skipped_tests",
             "list_of_failed_tests",
             "list_of_skipped_tests",
             "list_of_passed_tests",

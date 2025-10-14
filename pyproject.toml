@@ -39,7 +39,3 @@ profile = "black"
 source = [
     "fedora_cloud_tests/",
 ]
-
-[project.entry-points."fedora_messaging.messages"]
-"base.published.v1" = "fedora_cloud_tests.publish:BasePublished"
-"fedora_cloud_tests.published.v1.azure" = "fedora_cloud_tests.publish:AzureImageResultsPublished"

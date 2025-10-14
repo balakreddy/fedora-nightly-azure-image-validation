@@ -8,31 +8,31 @@ fedora-messaging registration.
 
 import pytest
 import jsonschema
-from fedora_cloud_tests_messages.publish import BasePublished, AzureImageResultsPublished
+from fedora_cloud_tests_messages.publish import BaseTestResults, AzureTestResults
 
 
-class TestBasePublished:
-    """Test cases for BasePublished base class."""
+class TestBaseTestResults:
+    """Test cases for BaseTestResults base class."""
 
     def test_topic_format(self):
         """Test that topic follows expected format."""
-        expected_topic = "org.fedoraproject.prod.fedora_cloud_tests.published.v1"
-        assert BasePublished.topic == expected_topic
+        expected_topic = "org.fedoraproject.prod.fedora_cloud_tests.test_results.v1"
+        assert BaseTestResults.topic == expected_topic
 
     def test_app_name_property(self):
         """Test that app_name property returns correct value."""
         # Test the class property directly - it's a property that returns a string
-        class_instance = BasePublished.__new__(BasePublished)
+        class_instance = BaseTestResults.__new__(BaseTestResults)
         assert class_instance.app_name == "fedora_cloud_tests"
 
 
-class TestAzureImageResultsPublished:
-    """Test cases for AzureImageResultsPublished message class."""
+class TestAzureTestResults:
+    """Test cases for AzureTestResults message class."""
 
     def test_topic_inheritance(self):
         """Test that Azure message inherits and extends base topic."""
-        expected_topic = "org.fedoraproject.prod.fedora_cloud_tests.published.v1.azure"
-        assert AzureImageResultsPublished.topic == expected_topic
+        expected_topic = "org.fedoraproject.prod.fedora_cloud_tests.test_results.v1.azure"
+        assert AzureTestResults.topic == expected_topic
 
     def test_schema_validation_missing_required_fields(self):
         """Test schema validation fails with missing required fields."""
@@ -41,10 +41,9 @@ class TestAzureImageResultsPublished:
             # Missing other required fields
         }
 
-        schema = AzureImageResultsPublished.body_schema
-
         with pytest.raises(jsonschema.ValidationError):
-            jsonschema.validate(incomplete_body, schema)
+            message = AzureTestResults(body=incomplete_body)
+            message.validate()  
 
     def test_schema_validation_wrong_data_types(self):
         """Test schema validation fails with wrong data types."""
@@ -63,10 +62,9 @@ class TestAzureImageResultsPublished:
             "list_of_passed_tests": ["test_module.test_case_1"]
         }
 
-        schema = AzureImageResultsPublished.body_schema
-
         with pytest.raises(jsonschema.ValidationError):
-            jsonschema.validate(invalid_body, schema)
+            message = AzureTestResults(body=invalid_body)
+            message.validate()  
 
     def test_schema_validation_invalid_array_items(self):
         """Test schema validation fails with invalid array items."""
@@ -85,14 +83,13 @@ class TestAzureImageResultsPublished:
             "list_of_passed_tests": ["test_module.test_case_1"]
         }
 
-        schema = AzureImageResultsPublished.body_schema
-
         with pytest.raises(jsonschema.ValidationError):
-            jsonschema.validate(invalid_body, schema)
+            message = AzureTestResults(body=invalid_body)
+            message.validate()
 
     def test_schema_properties_types(self):
         """Test that schema properties have correct types."""
-        schema = AzureImageResultsPublished.body_schema
+        schema = AzureTestResults.body_schema
         properties = schema["properties"]
 
         # Test string fields
@@ -128,20 +125,19 @@ class TestAzureImageResultsPublished:
             "list_of_passed_tests": []
         }
 
-        schema = AzureImageResultsPublished.body_schema
-
         # This should not raise any validation errors
-        jsonschema.validate(body_with_empty_lists, schema)
+        message = AzureTestResults(body=body_with_empty_lists)
+        message.validate()  
 
     def test_schema_url_generation(self):
         """Test that schema URL is generated correctly."""
-        schema = AzureImageResultsPublished.body_schema
-        expected_url = "http://fedoraproject.org/message-schema/v1/org.fedoraproject.prod.fedora_cloud_tests.published.v1.azure.json"
+        schema = AzureTestResults.body_schema
+        expected_url = "http://fedoraproject.org/message-schema/v1/org.fedoraproject.prod.fedora_cloud_tests.test_results.v1.azure.json"
         assert schema["id"] == expected_url
 
     def test_schema_metadata(self):
         """Test that schema contains correct metadata."""
-        schema = AzureImageResultsPublished.body_schema
+        schema = AzureTestResults.body_schema
 
         # Check required metadata fields
         assert "$schema" in schema
@@ -195,10 +191,8 @@ class TestSchemaIntegration:
         }
 
         # Step 4: Validate against schema
-        schema = AzureImageResultsPublished.body_schema
-
-        # This should pass validation without errors
-        jsonschema.validate(valid_message_body, schema)
+        message = AzureTestResults(body=valid_message_body)
+        message.validate()
 
         # Step 5: Verify mathematical consistency
         assert valid_message_body["total_tests"] == (
@@ -214,7 +208,7 @@ class TestSchemaIntegration:
 
         # Step 7: Test message class methods (without full instantiation)
         # We can test the string representation logic by creating a mock body
-        test_message = AzureImageResultsPublished.__new__(AzureImageResultsPublished)
+        test_message = AzureTestResults.__new__(AzureTestResults)
         test_message.body = valid_message_body
 
         # Verify the message methods work correctly
@@ -223,7 +217,7 @@ class TestSchemaIntegration:
 
     def test_memory_size_limits(self):
         """Test that memory size limits are enforced by the schema."""
-        schema = AzureImageResultsPublished.body_schema
+        schema = AzureTestResults.body_schema
 
         # Test array length limits
         # This should fail - too many passed tests (over 250 limit)
@@ -296,7 +290,7 @@ class TestSchemaIntegration:
 
     def test_memory_limits_valid_cases(self):
         """Test that valid cases within memory limits pass validation."""
-        schema = AzureImageResultsPublished.body_schema
+        schema = AzureTestResults.body_schema
 
         # Test near the limits but still valid
         large_but_valid_passed_list = [f"test_{i}" for i in range(250)]  # Exactly at the 250 limit

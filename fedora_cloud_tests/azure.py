@@ -18,7 +18,7 @@ from fedora_image_uploader_messages.publish import AzurePublishedV1
 from fedora_messaging import config, api
 from fedora_messaging.exceptions import ValidationError, PublishTimeout, ConnectionException
 
-from fedora_cloud_tests_messages.publish import AzureImageResultsPublished
+from fedora_cloud_tests_messages.fedora_cloud_tests_messages.publish import AzureTestResults
 
 from .trigger_lisa import LisaRunner
 
@@ -198,7 +198,7 @@ class AzurePublishedConsumer:
 
     def publish_test_results(self, message, test_results):
         """
-        Publish the test results using AzureImageResultsPublished publisher.
+        Publish the test results using AzureTestResults publisher.
         
         Following fedora-image-uploader patterns for message publishing.
         """
@@ -207,7 +207,7 @@ class AzurePublishedConsumer:
             body = self._build_result_message_body(message, test_results)
 
             # Create message instance with body (following fedora-messaging patterns)
-            result_message = AzureImageResultsPublished(body=body)
+            result_message = AzureTestResults(body=body)
 
             _log.info("Publishing test results for image: %s", body.get("image_definition_name"))
             _log.debug("Full message body: %s", body)
@@ -235,7 +235,7 @@ class AzurePublishedConsumer:
             test_results: Parsed test results dictionary
             
         Returns:
-            dict: Message body for AzureImageResultsPublished
+            dict: Message body for AzureTestResults
         """
         # Extract image metadata from original message
         body = original_message.body
@@ -248,12 +248,6 @@ class AzurePublishedConsumer:
             "image_id": body.get("image_definition_name"),  # Use definition name as image ID
             "image_definition_name": body.get("image_definition_name"),
             "image_resource_id": body.get("image_resource_id"),
-
-            # Test result summary
-            "total_tests": test_results.get("total_tests", 0),
-            "passed_tests": test_results.get("passed", 0),
-            "failed_tests": test_results.get("failed", 0),
-            "skipped_tests": test_results.get("skipped", 0),
 
             # Detailed test lists
             "list_of_failed_tests": test_results.get("failed_test_names", []),
@@ -355,10 +349,10 @@ class AzurePublishedConsumer:
 
         # Iterate through test suites and test cases
         for suite in test_suites:
-            suite_name = suite.attrib.get('name', 'unknown_suite')
+            suite_name = suite.attrib.get('name')
 
             for testcase in suite.findall('testcase'):
-                test_name = testcase.attrib.get('name', 'unknown_test')
+                test_name = testcase.attrib.get('name')
 
                 # Create a descriptive test identifier
                 test_identifier = f"{suite_name}.{test_name}"
@@ -367,7 +361,7 @@ class AzurePublishedConsumer:
                 if testcase.find('failure') is not None:
                     test_details['failed'].append(test_identifier)
                 elif testcase.find('error') is not None:
-                    test_details['failed'].append(test_identifier)  # Treat errors as failures
+                    test_details['failed'].append(test_identifier)
                 elif testcase.find('skipped') is not None:
                     test_details['skipped'].append(test_identifier)
                 else:
@@ -462,8 +456,8 @@ class AzurePublishedConsumer:
 
         try:
             # Generate SSH key pair using ssh-keygen
-            cmd = ["ssh-keygen", "-t", "rsa", "-b", "2048", "-f", private_key_path, "-N", ""]
-            ret = subprocess.run(cmd, check=True, capture_output=True, text=True)
+            cmd = ["ssh-keygen", "-t", "ed25519", "-f", private_key_path, "-N", ""]
+            ret = subprocess.run(cmd, check=True, capture_output=True, text=True, timeout=60)
             _log.info("SSH key pair generated at: %s and %s", private_key_path, public_key_path)
             _log.debug("ssh-keygen output: %s", ret.stdout)
 
