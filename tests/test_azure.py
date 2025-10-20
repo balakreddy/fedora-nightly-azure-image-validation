@@ -93,14 +93,14 @@ class TestAzurePublishedConsumer:
                 result = consumer._generate_ssh_key_pair(temp_dir)
 
                 # Verify the method returns the expected private key path
-                expected_path = os.path.join(temp_dir, "id_rsa")
+                expected_path = os.path.join(temp_dir, "id_ed25519")
                 assert result == expected_path
 
                 # Verify ssh-keygen was called with correct parameters
                 mock_subprocess.assert_called_once()
                 call_args = mock_subprocess.call_args[0][0]
                 assert "ssh-keygen" in call_args
-                assert "-t" in call_args and "rsa" in call_args
+                assert "-t" in call_args and "ed25519" in call_args
                 assert "-f" in call_args
 
                 # Verify file permissions were set

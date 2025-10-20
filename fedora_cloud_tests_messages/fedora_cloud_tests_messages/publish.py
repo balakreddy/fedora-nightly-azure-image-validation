@@ -62,32 +62,32 @@ class AzureTestResults(BaseTestResults):
             "architecture": {"type": "string"},
             "compose_id": {"type": "string"},
             "image_id": {"type": "string"},
-            "image_definition_name": {"type": "string"},
             "image_resource_id": {"type": "string"},
             # References to reusable test results schema
-            "list_of_failed_tests": {"$ref": "#/$defs/testResults"},
-            "list_of_skipped_tests": {"$ref": "#/$defs/testResults"},
-            "list_of_passed_tests": {"$ref": "#/$defs/testResults"}
+            "failed_tests": {"$ref": "#/$defs/testResults"},
+            "skipped_tests": {"$ref": "#/$defs/testResults"},
+            "passed_tests": {"$ref": "#/$defs/testResults"}
         },
         "required": [
             "architecture",
             "compose_id",
             "image_id",
-            "image_definition_name",
             "image_resource_id",
-            "list_of_failed_tests",
-            "list_of_skipped_tests",
-            "list_of_passed_tests",
+            "failed_tests",
+            "skipped_tests",
+            "passed_tests",
         ],
     }
 
     @property
     def summary(self):
         return (
-            f"{self.app_name} published Azure image test results for {self.body.get('image_id', 'unknown')}"
-            f" on {self.body.get('architecture', 'unknown')}"
+            f"Azure Cloud image {self.body['image_id']} tested successfully"
+            f" ({self.body['passed_tests']['count']} tests passed, "
+            f"{self.body['failed_tests']['count']} tests failed, "
+            f"{self.body['skipped_tests']['count']} tests skipped)"
         )
 
     def __str__(self):
         """Return string representation of the message."""
-        return f"AzureImageResultsPublished for {self.body.get('image_definition_name', 'unknown')}"
+        return f"AzureImageTestResults for {self.body.get('image_id')}"

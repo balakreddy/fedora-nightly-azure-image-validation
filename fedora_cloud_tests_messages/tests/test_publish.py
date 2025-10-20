@@ -43,7 +43,7 @@ class TestAzureTestResults:
 
         with pytest.raises(jsonschema.ValidationError):
             message = AzureTestResults(body=incomplete_body)
-            message.validate()  
+            message.validate()
 
     def test_schema_validation_wrong_data_types(self):
         """Test schema validation fails with wrong data types."""
@@ -51,285 +51,281 @@ class TestAzureTestResults:
             "architecture": "x86_64",
             "compose_id": "Fedora-Rawhide-20250922.n.0",
             "image_id": "Fedora-Cloud-Rawhide-x64",
-            "image_definition_name": "Fedora-Cloud-Rawhide-x64",
             "image_resource_id": "/subscriptions/test-sub/resourceGroups/test-rg/providers/Microsoft.Compute/galleries/test-gallery",
-            "total_tests": "not_a_number",  # Should be integer
-            "passed_tests": 8,
-            "failed_tests": 1,
-            "skipped_tests": 1,
-            "list_of_failed_tests": ["test_module.test_failed_case"],
-            "list_of_skipped_tests": ["test_module.test_skipped_case"],
-            "list_of_passed_tests": ["test_module.test_case_1"]
-        }
-
-        with pytest.raises(jsonschema.ValidationError):
-            message = AzureTestResults(body=invalid_body)
-            message.validate()  
-
-    def test_schema_validation_invalid_array_items(self):
-        """Test schema validation fails with invalid array items."""
-        invalid_body = {
-            "architecture": "x86_64",
-            "compose_id": "Fedora-Rawhide-20250922.n.0",
-            "image_id": "Fedora-Cloud-Rawhide-x64",
-            "image_definition_name": "Fedora-Cloud-Rawhide-x64",
-            "image_resource_id": "/subscriptions/test-sub/resourceGroups/test-rg/providers/Microsoft.Compute/galleries/test-gallery",
-            "total_tests": 10,
-            "passed_tests": 8,
-            "failed_tests": 1,
-            "skipped_tests": 1,
-            "list_of_failed_tests": [123],  # Should be strings, not numbers
-            "list_of_skipped_tests": ["test_module.test_skipped_case"],
-            "list_of_passed_tests": ["test_module.test_case_1"]
+            "passed_tests": "not_an_object",  # Should be object with count and tests
+            "failed_tests": {
+                "count": 1,
+                "tests": {"Dhcp.verify_dhcp_client_timeout": "DHCP client timeout configuration issue"}
+            },
+            "skipped_tests": {
+                "count": 1,
+                "tests": {"GpuTestSuite.verify_load_gpu_driver": "No available quota found on 'westus3'"}
+            }
         }
 
         with pytest.raises(jsonschema.ValidationError):
             message = AzureTestResults(body=invalid_body)
             message.validate()
 
-    def test_schema_properties_types(self):
-        """Test that schema properties have correct types."""
-        schema = AzureTestResults.body_schema
-        properties = schema["properties"]
-
-        # Test string fields
-        string_fields = ["architecture", "compose_id", "image_id", "image_definition_name", "image_resource_id"]
-        for field in string_fields:
-            assert properties[field]["type"] == "string"
-
-        # Test integer fields
-        integer_fields = ["total_tests", "passed_tests", "failed_tests", "skipped_tests"]
-        for field in integer_fields:
-            assert properties[field]["type"] == "integer"
-
-        # Test array fields
-        array_fields = ["list_of_failed_tests", "list_of_skipped_tests", "list_of_passed_tests"]
-        for field in array_fields:
-            assert properties[field]["type"] == "array"
-            assert properties[field]["items"]["type"] == "string"
-
-    def test_empty_test_lists(self):
-        """Test schema validation with empty test lists."""
-        body_with_empty_lists = {
-            "architecture": "aarch64",
-            "compose_id": "Fedora-41-20250922.n.0",
-            "image_id": "Fedora-Cloud-41-Arm64",
-            "image_definition_name": "Fedora-Cloud-41-Arm64",
+    def test_schema_validation_invalid_test_objects(self):
+        """Test schema validation fails with invalid test result objects."""
+        invalid_body = {
+            "architecture": "x86_64",
+            "compose_id": "Fedora-Rawhide-20250922.n.0",
+            "image_id": "Fedora-Cloud-Rawhide-x64",
             "image_resource_id": "/subscriptions/test-sub/resourceGroups/test-rg/providers/Microsoft.Compute/galleries/test-gallery",
-            "total_tests": 0,
-            "passed_tests": 0,
-            "failed_tests": 0,
-            "skipped_tests": 0,
-            "list_of_failed_tests": [],
-            "list_of_skipped_tests": [],
-            "list_of_passed_tests": []
+            "passed_tests": {
+                "count": 1,
+                "tests": {"AzureImageStandard.verify_grub": "Test passed in 5.494 seconds"}
+            },
+            "failed_tests": {
+                "count": "not_a_number",  # Should be integer
+                "tests": {"Storage.verify_swap": "Swap configuration from waagent.conf and distro should match"}
+            },
+            "skipped_tests": {
+                "count": 1,
+                "tests": {"ACCBasicTest.verify_sgx": "No available quota found on 'westus3'"}
+            }
         }
 
-        # This should not raise any validation errors
-        message = AzureTestResults(body=body_with_empty_lists)
-        message.validate()  
+        with pytest.raises(jsonschema.ValidationError):
+            message = AzureTestResults(body=invalid_body)
+            message.validate()
 
-    def test_schema_url_generation(self):
-        """Test that schema URL is generated correctly."""
-        schema = AzureTestResults.body_schema
-        expected_url = "http://fedoraproject.org/message-schema/v1/org.fedoraproject.prod.fedora_cloud_tests.test_results.v1.azure.json"
-        assert schema["id"] == expected_url
+    def test_message_string_representation(self):
+        """Test the __str__ method of AzureTestResults."""
+        valid_body = {
+            "architecture": "x86_64",
+            "compose_id": "Fedora-41-20241001.n.0",
+            "image_id": "Fedora-Cloud-41-x64",
+            "image_resource_id": "/subscriptions/test/resourceGroups/test/providers/Microsoft.Compute/galleries/test",
+            "failed_tests": {
+                "count": 0,
+                "tests": {}
+            },
+            "skipped_tests": {
+                "count": 0,
+                "tests": {}
+            },
+            "passed_tests": {
+                "count": 1,
+                "tests": {"Provisioning.smoke_test": "Test passed in 46.198 seconds"}
+            }
+        }
 
-    def test_schema_metadata(self):
-        """Test that schema contains correct metadata."""
-        schema = AzureTestResults.body_schema
+        message = AzureTestResults(body=valid_body)
+        str_repr = str(message)
+        assert "Fedora-Cloud-41-x64" in str_repr
+        assert "AzureImageTestResults" in str_repr
 
-        # Check required metadata fields
-        assert "$schema" in schema
-        assert schema["$schema"] == "http://json-schema.org/draft-07/schema#"
-        assert "Description" in schema
-        assert "Azure" in schema["Description"]
+    def test_message_summary_property(self):
+        """Test the summary property of AzureTestResults."""
+        # Using realistic test counts from LISA XML data (91 total: 58 passed, 8 failed, 25 skipped)
+        valid_body = {
+            "architecture": "x86_64",
+            "compose_id": "Fedora-41-20241001.n.0",
+            "image_id": "Fedora-Cloud-41-x64",
+            "image_resource_id": "/subscriptions/test/resourceGroups/test/providers/Microsoft.Compute/galleries/test",
+            "failed_tests": {
+                "count": 8,
+                "tests": {
+                    "Dhcp.verify_dhcp_client_timeout": "DHCP client timeout should be set equal or more than 300 seconds",
+                    "AzureDiskEncryption.verify_azure_disk_encryption_provisioned": "Azure authentication token expired",
+                    "HvModule.verify_initrd_modules": "Required Hyper-V modules are missing from initrd",
+                    "Storage.verify_swap": "Swap configuration from waagent.conf and distro should match",
+                    "Provisioning.verify_deployment_provision_premiumv2_disk": "VM size Standard_DS2_v2 not available in WestUS3",
+                    "Provisioning.verify_deployment_provision_ultra_datadisk": "VM size Standard_B2als_v2 not available in WestUS3",
+                    "VMAccessTests.verify_valid_password_run": "Password not set as intended for user vmaccessuser",
+                    "Vdso.verify_vdso": "Current distro Fedora doesn't support vdsotest"
+                }
+            },
+            "skipped_tests": {
+                "count": 25,
+                "tests": {
+                    "ACCBasicTest.verify_sgx": "No available quota found on 'westus3'",
+                    "CVMSuite.verify_lsvmbus": "Security profile requirement not supported in capability",
+                    "GpuTestSuite.verify_load_gpu_driver": "No available quota found on 'westus3'",
+                    "ApplicationHealthExtension.verify_application_health_extension": "Fedora release 41 is not supported"
+                }
+            },
+            "passed_tests": {
+                "count": 58,
+                "tests": {
+                    "LsVmBus.verify_vmbus_devices_channels": "Test passed in 20.126 seconds",
+                    "Floppy.verify_floppy_module_is_blacklisted": "Test passed in 3.309 seconds",
+                    "Dns.verify_dns_name_resolution": "Test passed in 8.379 seconds",
+                    "AzureImageStandard.verify_default_targetpw": "Test passed in 2.992 seconds",
+                    "AzureImageStandard.verify_grub": "Test passed in 5.494 seconds"
+                }
+            }
+        }
+
+        message = AzureTestResults(body=valid_body)
+        summary = message.summary
+
+        # Check that summary contains test counts matching LISA results
+        assert "58 tests passed" in summary
+        assert "8 tests failed" in summary
+        assert "25 tests skipped" in summary
+        assert "Fedora-Cloud-41-x64" in summary
 
 
-# pylint: disable=too-few-public-methods
 class TestSchemaIntegration:
     """Integration tests for schema functionality."""
 
     def test_create_valid_message_body_example(self):
-        """Example of how to create a properly formatted message body."""
-        # Step 1: Define your test results
-        failed_tests = ["test_network_connectivity", "test_disk_performance"]
-        skipped_tests = ["test_gpu_support"]
-        passed_tests = [
-            "test_system_boot",
-            "test_ssh_connection",
-            "test_package_manager",
-            "test_basic_commands",
-            "test_file_system"
-        ]
-
-        # Step 2: Calculate totals (ensure mathematical consistency)
-        total_failed = len(failed_tests)
-        total_skipped = len(skipped_tests)
-        total_passed = len(passed_tests)
-        total_tests = total_failed + total_skipped + total_passed
-
-        # Step 3: Create the message body with all required fields
+        """Example of how to create a properly formatted message body with real LISA test names."""
         valid_message_body = {
-            # Image identification fields
             "architecture": "x86_64",
             "compose_id": "Fedora-41-20241001.n.0",
             "image_id": "Fedora-Cloud-41-x64",
-            "image_definition_name": "Fedora-Cloud-41-x64",
-            "image_resource_id": "/subscriptions/12345678-1234-1234-1234-123456789012/resourceGroups/fedora-images/providers/Microsoft.Compute/galleries/fedora-gallery/images/fedora-cloud-41",
-
-            # Test count fields (must match array lengths)
-            "total_tests": total_tests,
-            "passed_tests": total_passed,
-            "failed_tests": total_failed,
-            "skipped_tests": total_skipped,
-
-            # Test name arrays (lengths must match counts above)
-            "list_of_failed_tests": failed_tests,
-            "list_of_skipped_tests": skipped_tests,
-            "list_of_passed_tests": passed_tests
+            "image_resource_id": "/subscriptions/test/resourceGroups/test/providers/Microsoft.Compute/galleries/test",
+            "failed_tests": {
+                "count": 3,
+                "tests": {
+                    "Dhcp.verify_dhcp_client_timeout": "DHCP client timeout should be set equal or more than 300 seconds",
+                    "Storage.verify_swap": "Swap configuration from waagent.conf and distro should match",
+                    "VMAccessTests.verify_valid_password_run": "Password not set as intended for user vmaccessuser"
+                }
+            },
+            "skipped_tests": {
+                "count": 4,
+                "tests": {
+                    "ACCBasicTest.verify_sgx": "No available quota found on 'westus3'",
+                    "GpuTestSuite.verify_load_gpu_driver": "No available quota found on 'westus3'",
+                    "ApplicationHealthExtension.verify_application_health_extension": "Fedora release 41 is not supported",
+                    "NetworkWatcherExtension.verify_azure_network_watcher": "Fedora release 41 is not supported"
+                }
+            },
+            "passed_tests": {
+                "count": 5,
+                "tests": {
+                    "LsVmBus.verify_vmbus_devices_channels": "Test passed in 20.126 seconds",
+                    "Dns.verify_dns_name_resolution": "Test passed in 8.379 seconds",
+                    "AzureImageStandard.verify_grub": "Test passed in 5.494 seconds",
+                    "Storage.verify_resource_disk_mounted": "Test passed in 5.923 seconds",
+                    "TimeSync.verify_timedrift_corrected": "Test passed in 54.743 seconds"
+                }
+            }
         }
 
-        # Step 4: Validate against schema
+        # Validate against schema
         message = AzureTestResults(body=valid_message_body)
         message.validate()
 
-        # Step 5: Verify mathematical consistency
-        assert valid_message_body["total_tests"] == (
-            valid_message_body["passed_tests"] +
-            valid_message_body["failed_tests"] +
-            valid_message_body["skipped_tests"]
-        )
+        # Verify count consistency
+        assert valid_message_body["failed_tests"]["count"] == len(valid_message_body["failed_tests"]["tests"])
+        assert valid_message_body["skipped_tests"]["count"] == len(valid_message_body["skipped_tests"]["tests"])
+        assert valid_message_body["passed_tests"]["count"] == len(valid_message_body["passed_tests"]["tests"])
 
-        # Step 6: Verify array length consistency
-        assert len(valid_message_body["list_of_failed_tests"]) == valid_message_body["failed_tests"]
-        assert len(valid_message_body["list_of_skipped_tests"]) == valid_message_body["skipped_tests"]
-        assert len(valid_message_body["list_of_passed_tests"]) == valid_message_body["passed_tests"]
+        # Test message methods
+        assert "Fedora-Cloud-41-x64" in str(message)
+        summary = message.summary
+        assert "5 tests passed" in summary
+        assert "3 tests failed" in summary
+        assert "4 tests skipped" in summary
 
-        # Step 7: Test message class methods (without full instantiation)
-        # We can test the string representation logic by creating a mock body
-        test_message = AzureTestResults.__new__(AzureTestResults)
-        test_message.body = valid_message_body
-
-        # Verify the message methods work correctly
-        assert "Fedora-Cloud-41-x64" in str(test_message)
-        assert "fedora_cloud_tests published Azure image test results" in test_message.summary
-
-    def test_memory_size_limits(self):
-        """Test that memory size limits are enforced by the schema."""
-        schema = AzureTestResults.body_schema
-
-        # Test array length limits
-        # This should fail - too many passed tests (over 250 limit)
-        oversized_passed_list = [f"test_case_{i}" for i in range(251)]
-
-        invalid_body_too_many_tests = {
+    def test_test_results_object_validation(self):
+        """Test validation of test results object structure."""
+        # Test missing required fields in test results object
+        invalid_body_missing_count = {
             "architecture": "x86_64",
             "compose_id": "Fedora-41-20241001.n.0",
             "image_id": "Fedora-Cloud-41-x64",
-            "image_definition_name": "Fedora-Cloud-41-x64",
             "image_resource_id": "/subscriptions/test/resourceGroups/test/providers/Microsoft.Compute/galleries/test",
-            "total_tests": 250,  # Keep count valid
-            "passed_tests": 250,  # Keep count valid
-            "failed_tests": 0,
-            "skipped_tests": 0,
-            "list_of_failed_tests": [],
-            "list_of_skipped_tests": [],
-            "list_of_passed_tests": oversized_passed_list  # But array is oversized
+            "failed_tests": {
+                # Missing "count" field
+                "tests": {"Vdso.verify_vdso": "Current distro Fedora doesn't support vdsotest"}
+            },
+            "skipped_tests": {
+                "count": 0,
+                "tests": {}
+            },
+            "passed_tests": {
+                "count": 0,
+                "tests": {}
+            }
         }
 
-        with pytest.raises(jsonschema.ValidationError) as exc_info:
-            jsonschema.validate(invalid_body_too_many_tests, schema)
-        # The error could be about maxItems or about inconsistency
-        error_msg = str(exc_info.value)
-        assert "maxItems" in error_msg or "251" in error_msg
+        with pytest.raises(jsonschema.ValidationError):
+            message = AzureTestResults(body=invalid_body_missing_count)
+            message.validate()
 
-        # Test string length limits
-        # This should fail - test name too long (over 200 characters)
-        long_test_name = "a" * 201
-
-        invalid_body_long_test_name = {
+        # Test missing required fields in test results object
+        invalid_body_missing_tests = {
             "architecture": "x86_64",
             "compose_id": "Fedora-41-20241001.n.0",
             "image_id": "Fedora-Cloud-41-x64",
-            "image_definition_name": "Fedora-Cloud-41-x64",
             "image_resource_id": "/subscriptions/test/resourceGroups/test/providers/Microsoft.Compute/galleries/test",
-            "total_tests": 1,
-            "passed_tests": 1,
-            "failed_tests": 0,
-            "skipped_tests": 0,
-            "list_of_failed_tests": [],
-            "list_of_skipped_tests": [],
-            "list_of_passed_tests": [long_test_name]
+            "failed_tests": {
+                "count": 1,
+                # Missing "tests" field
+            },
+            "skipped_tests": {
+                "count": 0,
+                "tests": {}
+            },
+            "passed_tests": {
+                "count": 0,
+                "tests": {}
+            }
         }
 
-        with pytest.raises(jsonschema.ValidationError) as exc_info:
-            jsonschema.validate(invalid_body_long_test_name, schema)
-        assert "maxLength" in str(exc_info.value)
+        with pytest.raises(jsonschema.ValidationError):
+            message = AzureTestResults(body=invalid_body_missing_tests)
+            message.validate()
 
-        # Test integer limits
-        # This should fail - too many total tests (over 750)
-        invalid_body_too_many_total = {
+    def test_valid_edge_cases(self):
+        """Test valid edge cases that should pass validation."""
+        # Test with only passed tests
+        only_passed_body = {
             "architecture": "x86_64",
             "compose_id": "Fedora-41-20241001.n.0",
             "image_id": "Fedora-Cloud-41-x64",
-            "image_definition_name": "Fedora-Cloud-41-x64",
             "image_resource_id": "/subscriptions/test/resourceGroups/test/providers/Microsoft.Compute/galleries/test",
-            "total_tests": 751,  # Over the limit
-            "passed_tests": 251,  # Over the limit
-            "failed_tests": 0,
-            "skipped_tests": 0,
-            "list_of_failed_tests": [],
-            "list_of_skipped_tests": [],
-            "list_of_passed_tests": ["test1"]  # Just one test name to avoid array limit
+            "failed_tests": {
+                "count": 0,
+                "tests": {}
+            },
+            "skipped_tests": {
+                "count": 0,
+                "tests": {}
+            },
+            "passed_tests": {
+                "count": 3,
+                "tests": {
+                    "Provisioning.smoke_test": "Test passed in 46.198 seconds",
+                    "Dns.verify_dns_name_resolution": "Test passed in 8.379 seconds",
+                    "KernelDebug.verify_enable_kprobe": "Test passed in 10.013 seconds"
+                }
+            }
         }
 
-        with pytest.raises(jsonschema.ValidationError) as exc_info:
-            jsonschema.validate(invalid_body_too_many_total, schema)
-        assert "maximum" in str(exc_info.value)
+        message = AzureTestResults(body=only_passed_body)
+        message.validate()  # Should not raise
 
-    def test_memory_limits_valid_cases(self):
-        """Test that valid cases within memory limits pass validation."""
-        schema = AzureTestResults.body_schema
-
-        # Test near the limits but still valid
-        large_but_valid_passed_list = [f"test_{i}" for i in range(250)]  # Exactly at the 250 limit
-
-        valid_body_large = {
-            "architecture": "x86_64",
-            "compose_id": "Fedora-41-20241001.n.0",
-            "image_id": "Fedora-Cloud-41-x64",
-            "image_definition_name": "Fedora-Cloud-41-x64",
+        # Test with only failed tests
+        only_failed_body = {
+            "architecture": "aarch64",
+            "compose_id": "Fedora-Rawhide-20241015.n.0",
+            "image_id": "Fedora-Cloud-Rawhide-Arm64",
             "image_resource_id": "/subscriptions/test/resourceGroups/test/providers/Microsoft.Compute/galleries/test",
-            "total_tests": 250,
-            "passed_tests": 250,
-            "failed_tests": 0,
-            "skipped_tests": 0,
-            "list_of_failed_tests": [],
-            "list_of_skipped_tests": [],
-            "list_of_passed_tests": large_but_valid_passed_list
+            "failed_tests": {
+                "count": 2,
+                "tests": {
+                    "Dhcp.verify_dhcp_client_timeout": "DHCP client timeout should be set equal or more than 300 seconds",
+                    "Storage.verify_swap": "Swap configuration from waagent.conf and distro should match"
+                }
+            },
+            "skipped_tests": {
+                "count": 0,
+                "tests": {}
+            },
+            "passed_tests": {
+                "count": 0,
+                "tests": {}
+            }
         }
 
-        # This should not raise any validation errors
-        jsonschema.validate(valid_body_large, schema)
-
-        # Test maximum allowed string length (200 characters)
-        max_length_test_name = "a" * 200
-
-        valid_body_max_string = {
-            "architecture": "x86_64",
-            "compose_id": "Fedora-41-20241001.n.0",
-            "image_id": "Fedora-Cloud-41-x64",
-            "image_definition_name": "Fedora-Cloud-41-x64",
-            "image_resource_id": "/subscriptions/test/resourceGroups/test/providers/Microsoft.Compute/galleries/test",
-            "total_tests": 1,
-            "passed_tests": 1,
-            "failed_tests": 0,
-            "skipped_tests": 0,
-            "list_of_failed_tests": [],
-            "list_of_skipped_tests": [],
-            "list_of_passed_tests": [max_length_test_name]
-        }
-
-        # This should not raise any validation errors
-        jsonschema.validate(valid_body_max_string, schema)
+        message = AzureTestResults(body=only_failed_body)
+        message.validate()  # Should not raise

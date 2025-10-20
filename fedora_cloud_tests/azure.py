@@ -18,7 +18,7 @@ from fedora_image_uploader_messages.publish import AzurePublishedV1
 from fedora_messaging import config, api
 from fedora_messaging.exceptions import ValidationError, PublishTimeout, ConnectionException
 
-from fedora_cloud_tests_messages.fedora_cloud_tests_messages.publish import AzureTestResults
+from fedora_cloud_tests_messages.publish import AzureTestResults
 
 from .trigger_lisa import LisaRunner
 
@@ -209,14 +209,14 @@ class AzurePublishedConsumer:
             # Create message instance with body (following fedora-messaging patterns)
             result_message = AzureTestResults(body=body)
 
-            _log.info("Publishing test results for image: %s", body.get("image_definition_name"))
+            _log.info("Publishing test results for image: %s", body["image_id"])
             _log.debug("Full message body: %s", body)
 
             # Publish message using fedora-messaging API
             api.publish(result_message)
 
             _log.info("Successfully published test results for %s",
-                     body.get("image_definition_name"))
+                     body["image_id"])
 
         except ValidationError as e:
             _log.error("Message validation failed: %s", str(e))
@@ -243,16 +243,15 @@ class AzurePublishedConsumer:
         # Build the result message body following the schema
         result_body = {
             # Image identification
-            "architecture": body.get("architecture"),
-            "compose_id": body.get("compose_id"),
-            "image_id": body.get("image_definition_name"),  # Use definition name as image ID
-            "image_definition_name": body.get("image_definition_name"),
-            "image_resource_id": body.get("image_resource_id"),
+            "architecture": body["architecture"],
+            "compose_id": body["compose_id"],
+            "image_id": body["image_definition_name"],  # Use definition name as image ID
+            "image_resource_id": body["image_resource_id"],
 
             # Detailed test lists
-            "list_of_failed_tests": test_results.get("failed_test_names", []),
-            "list_of_skipped_tests": test_results.get("skipped_test_names", []),
-            "list_of_passed_tests": test_results.get("passed_test_names", [])
+            "failed_tests": test_results.get("failed_tests", {"count": 0, "tests": {}}),
+            "skipped_tests": test_results.get("skipped_tests", {"count": 0, "tests": {}}),
+            "passed_tests": test_results.get("passed_tests", {"count": 0, "tests": {}})
         }
 
         return result_body
@@ -282,51 +281,15 @@ class AzurePublishedConsumer:
             root = tree.getroot()
             _log.info("Parsing xml root element: %s", root.tag)
 
-            counters = self._extract_test_counters(root)
-            if counters is None:
-                return None
-
             # Extract individual test details
             test_details = self._extract_test_details(root)
-            final_results = self._calculate_final_results(counters, test_details)
+            results = self._format_for_schema(test_details)
 
-            return final_results
+            return results
 
         except ET.ParseError as e:
             _log.error("Failed to parse XML file %s: %s", xml_file, str(e))
             return None
-
-    def _extract_test_counters(self, root):
-        """
-        Extract test counters from XML root element.
-        
-        Args:
-            root: XML root element (either 'testsuites' or 'testsuite')
-            
-        Returns:
-            dict: Test counters or None if extraction fails
-        """
-        if root.tag not in ("testsuite", "testsuites"):
-            _log.error("Unexpected XML root element: %s", root.tag)
-            return None
-
-        counters = {'total_tests': 0, 'failures': 0, 'errors': 0, 'skipped': 0}
-
-        # Extract counters from root element
-        for key, attr in [('total_tests', 'tests'), ('failures', 'failures'),
-                         ('errors', 'errors'), ('skipped', 'skipped')]:
-            attr_value = root.attrib.get(attr, '0')
-            counters[key] = int(attr_value) if attr_value.isdigit() else 0
-
-        # If root doesn't have values and it's testsuites, sum from individual test suites
-        if counters['total_tests'] == 0 and root.tag != 'testsuite':
-            for suite in root.findall("testsuite"):
-                for key, attr in [('total_tests', 'tests'), ('failures', 'failures'),
-                                 ('errors', 'errors'), ('skipped', 'skipped')]:
-                    attr_value = suite.attrib.get(attr, '0')
-                    counters[key] += int(attr_value) if attr_value.isdigit() else 0
-
-        return counters
 
     def _extract_test_details(self, root):
         """
@@ -356,16 +319,43 @@ class AzurePublishedConsumer:
 
                 # Create a descriptive test identifier
                 test_identifier = f"{suite_name}.{test_name}"
+                test_time = testcase.attrib.get('time', '0.000')
 
-                # Check test status based on child elements
-                if testcase.find('failure') is not None:
-                    test_details['failed'].append(test_identifier)
-                elif testcase.find('error') is not None:
-                    test_details['failed'].append(test_identifier)
-                elif testcase.find('skipped') is not None:
-                    test_details['skipped'].append(test_identifier)
+                # Check test status and extract the message if available
+                failure_elem = testcase.find('failure')
+                error_elem = testcase.find('error')
+                skipped_elem = testcase.find('skipped')
+
+                # Log test details for failed, skipped and errored tests
+                if failure_elem is not None:
+                    failure_msg = failure_elem.attrib.get('message', 'Test case failed')
+                    failure_msg = self._remove_html_tags(failure_msg)
+
+                    # Enhance failure message by removing stack trace if present
+                    if "Traceback" in failure_msg:
+                        extract_msg = failure_msg.split("Traceback")[0].strip()
+                        failure_msg = extract_msg if extract_msg else failure_msg
+                    test_details['failed'].append((test_identifier, failure_msg))
+
+                elif error_elem is not None:
+                    error_msg = error_elem.attrib.get('message', 'Test error')
+                    error_msg = self._remove_html_tags(error_msg)
+
+                    if "Traceback" in error_msg:
+                        extract_msg = error_msg.split("Traceback")[0].strip()
+                        error_msg = extract_msg if extract_msg else error_msg
+                    test_details['failed'].append((test_identifier, error_msg))
+
+                elif skipped_elem is not None:
+                    skip_msg = skipped_elem.attrib.get('message', 'Test skipped')
+                    skip_msg = self._remove_html_tags(skip_msg)
+
+                    # As there won't be any traceback will return the entire message
+                    test_details['skipped'].append((test_identifier, skip_msg))
+
                 else:
-                    test_details['passed'].append(test_identifier)
+                    passed_msg = f"Test passed in {test_time} seconds."
+                    test_details['passed'].append((test_identifier, passed_msg))
 
         _log.info("Extracted test details - Passed: %d, Failed: %d, Skipped: %d",
                   len(test_details['passed']),
@@ -374,39 +364,31 @@ class AzurePublishedConsumer:
 
         return test_details
 
-    def _calculate_final_results(self, counters, test_details=None):
+    def _remove_html_tags(self, msg):
+        "Remove HTML tags from the message."
+        return msg.replace("&lt;", "<").replace("&gt;", ">").replace("&amp;", "&")
+
+    def _format_for_schema(self, test_details=None):
         """
-        Calculate final test results from counters.
-        
+        Format the test details into the schema required for publishing.
         Args:
-            counters (dict): Dictionary with test count data
-            test_details (dict, optional): Dictionary with test name lists
+            test_details (dict): Dictionary with test name lists
             
         Returns:
-            dict: Final test results with calculated passed tests and optional test lists
+            dict: Formatted test results for schema compliance
         """
-        failed_total = counters['failures'] + counters['errors']
-        passed_tests = max(0, counters['total_tests'] - failed_total - counters['skipped'])
-
-        _log.info("Parsed test results - Total: %d, Passed: %d, Failed: %d, Errors: %d, Skipped: %d",
-                  counters['total_tests'], passed_tests, counters['failures'],
-                  counters['errors'], counters['skipped'])
-
-        results = {
-            'total_tests': counters['total_tests'],
-            'passed': passed_tests,
-            'failed': counters['failures'],
-            'skipped': counters['skipped'],
-            'errors': counters['errors']
-        }
-
-        # Add test name lists if provided
+        results = {}
         if test_details:
-            results.update({
-                'failed_test_names': test_details['failed'],
-                'skipped_test_names': test_details['skipped'],
-                'passed_test_names': test_details['passed']
-            })
+            for each_category in ['passed', 'failed', 'skipped']:
+                test_list = test_details.get(each_category, [])
+                tests_dict = {}
+                for test_name, message in test_list:
+                    tests_dict[test_name] = message
+
+                results[f"{each_category}_tests"] = {
+                    'count': len(test_list),
+                    'tests': tests_dict
+                }
 
         return results
 
@@ -451,8 +433,8 @@ class AzurePublishedConsumer:
             str: Path to the private key file. or None if generation fails.
         """
 
-        private_key_path = os.path.join(temp_dir, "id_rsa")
-        public_key_path = os.path.join(temp_dir, "id_rsa.pub")
+        private_key_path = os.path.join(temp_dir, "id_ed25519")
+        public_key_path = os.path.join(temp_dir, "id_ed25519.pub")
 
         try:
             # Generate SSH key pair using ssh-keygen

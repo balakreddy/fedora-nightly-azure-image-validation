@@ -18,6 +18,7 @@ jobs:
       run: |
         python -m pip install --upgrade pip
         pip install pylint pytest fedora_image_uploader_messages fedora_messaging
+        pip install -e ./fedora_cloud_tests_messages
     - name: Analysing the code with pylint
       run: |
         pylint --disable=redefined-outer-name,line-too-long --max-line-length=120 $(git ls-files '*.py')
