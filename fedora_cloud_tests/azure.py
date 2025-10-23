@@ -334,7 +334,7 @@ class AzurePublishedConsumer:
 
                     # Combine failure_message and traceback if available
                     if traceback_msg.strip():
-                        failure_msg = f"Summary: {failure_msg}\n\ Traceback: \n{traceback_msg.strip()}"
+                        failure_msg = f"Summary: {failure_msg}\n Traceback: \n{traceback_msg.strip()}"
                     test_details['failed'].append((test_identifier, failure_msg))
 
                 elif error_elem is not None:
@@ -342,7 +342,7 @@ class AzurePublishedConsumer:
                     error_msg = self._remove_html_tags(error_msg)
                     traceback_msg = error_elem.text or ''
                     if traceback_msg.strip():
-                        error_msg = f"Summary: {error_msg}\n\ Traceback: \n{traceback_msg.strip()}"
+                        error_msg = f"Summary: {error_msg}\n Traceback: \n{traceback_msg.strip()}"
                     test_details['failed'].append((test_identifier, error_msg))
 
                 elif skipped_elem is not None:
