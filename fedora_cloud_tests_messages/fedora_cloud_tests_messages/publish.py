@@ -13,7 +13,7 @@ SCHEMA_URL = "http://fedoraproject.org/message-schema/v1"
 class BaseTestResults(message.Message):
     """Base class for fedora_cloud_tests published messages."""
 
-    topic = "org.fedoraproject.prod.fedora_cloud_tests.test_results.v1"
+    topic = "fedora_cloud_tests.test_results.v1"
 
     @property
     def app_name(self):

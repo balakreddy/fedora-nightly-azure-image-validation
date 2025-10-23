@@ -16,7 +16,7 @@ class TestBaseTestResults:
 
     def test_topic_format(self):
         """Test that topic follows expected format."""
-        expected_topic = "org.fedoraproject.prod.fedora_cloud_tests.test_results.v1"
+        expected_topic = "fedora_cloud_tests.test_results.v1"
         assert BaseTestResults.topic == expected_topic
 
     def test_app_name_property(self):
@@ -31,7 +31,7 @@ class TestAzureTestResults:
 
     def test_topic_inheritance(self):
         """Test that Azure message inherits and extends base topic."""
-        expected_topic = "org.fedoraproject.prod.fedora_cloud_tests.test_results.v1.azure"
+        expected_topic = "fedora_cloud_tests.test_results.v1.azure"
         assert AzureTestResults.topic == expected_topic
 
     def test_schema_validation_missing_required_fields(self):
@@ -115,8 +115,7 @@ class TestAzureTestResults:
 
         message = AzureTestResults(body=valid_body)
         str_repr = str(message)
-        assert "Fedora-Cloud-41-x64" in str_repr
-        assert "AzureImageTestResults" in str_repr
+        assert "AzureImageTestResults for Fedora-Cloud-41-x64" == str_repr
 
     def test_message_summary_property(self):
         """Test the summary property of AzureTestResults."""

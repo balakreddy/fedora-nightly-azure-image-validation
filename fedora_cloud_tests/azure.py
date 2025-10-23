@@ -330,20 +330,19 @@ class AzurePublishedConsumer:
                 if failure_elem is not None:
                     failure_msg = failure_elem.attrib.get('message', 'Test case failed')
                     failure_msg = self._remove_html_tags(failure_msg)
+                    traceback_msg = failure_elem.text or ''
 
-                    # Enhance failure message by removing stack trace if present
-                    if "Traceback" in failure_msg:
-                        extract_msg = failure_msg.split("Traceback")[0].strip()
-                        failure_msg = extract_msg if extract_msg else failure_msg
+                    # Combine failure_message and traceback if available
+                    if traceback_msg.strip():
+                        failure_msg = f"Summary: {failure_msg}\n\ Traceback: \n{traceback_msg.strip()}"
                     test_details['failed'].append((test_identifier, failure_msg))
 
                 elif error_elem is not None:
                     error_msg = error_elem.attrib.get('message', 'Test error')
                     error_msg = self._remove_html_tags(error_msg)
-
-                    if "Traceback" in error_msg:
-                        extract_msg = error_msg.split("Traceback")[0].strip()
-                        error_msg = extract_msg if extract_msg else error_msg
+                    traceback_msg = error_elem.text or ''
+                    if traceback_msg.strip():
+                        error_msg = f"Summary: {error_msg}\n\ Traceback: \n{traceback_msg.strip()}"
                     test_details['failed'].append((test_identifier, error_msg))
 
                 elif skipped_elem is not None:
