@@ -10,15 +10,17 @@ import asyncio
 import logging
 import os
 from datetime import datetime, timezone
+import subprocess
 from tempfile import TemporaryDirectory
 import xml.etree.ElementTree as ET
 
 from fedora_image_uploader_messages.publish import AzurePublishedV1
-from fedora_messaging import config
+from fedora_messaging import config, api
+from fedora_messaging.exceptions import ValidationError, PublishTimeout, ConnectionException
+
+from fedora_cloud_tests_messages.publish import AzureTestResults
 
 from .trigger_lisa import LisaRunner
-
-PRIVATE_KEY = ""  # Path to the private key file for Azure authentication
 
 _log = logging.getLogger(__name__)
 
@@ -158,9 +160,12 @@ class AzurePublishedConsumer:
             ) as log_path:
                 _log.info("Temporary log path created: %s", log_path)
 
+                # Generate SSH key pair for authentication
+                private_key = self._generate_ssh_key_pair(log_path)
+
                 config_params = {
                     "subscription": self.conf["subscription_id"],
-                    "private_key": PRIVATE_KEY,
+                    "private_key": private_key,
                     "log_path": log_path,
                     "run_name": run_name,
                 }
@@ -181,6 +186,7 @@ class AzurePublishedConsumer:
                     if test_results is not None:
                         _log.info("Test execution completed with results: %s", test_results)
                         # To Do: Implement sending the results using publisher
+                        self.publish_test_results(message, test_results)
                     else:
                         _log.error("Failed to parse test results, skipping image")
                 else:
@@ -189,6 +195,66 @@ class AzurePublishedConsumer:
 
         except OSError as e:
             _log.exception("Failed to trigger LISA: %s", str(e))
+
+    def publish_test_results(self, message, test_results):
+        """
+        Publish the test results using AzureTestResults publisher.
+        
+        Following fedora-image-uploader patterns for message publishing.
+        """
+        try:
+            # Extract metadata from original message
+            body = self._build_result_message_body(message, test_results)
+
+            # Create message instance with body (following fedora-messaging patterns)
+            result_message = AzureTestResults(body=body)
+
+            _log.info("Publishing test results for image: %s", body["image_id"])
+            _log.debug("Full message body: %s", body)
+
+            # Publish message using fedora-messaging API
+            api.publish(result_message)
+
+            _log.info("Successfully published test results for %s",
+                     body["image_id"])
+
+        except ValidationError as e:
+            _log.error("Message validation failed: %s", str(e))
+            _log.error("Invalid message body: %s", body)
+        except (PublishTimeout, ConnectionException) as e:
+            _log.error("Failed to publish test results due to connectivity: %s", str(e))
+        except (OSError, KeyError, TypeError) as e:
+            _log.error("Unexpected error during publishing: %s", str(e))
+
+    def _build_result_message_body(self, original_message, test_results):
+        """
+        Build the message body for test results publication.
+        
+        Args:
+            original_message: The original AzurePublishedV1 message
+            test_results: Parsed test results dictionary
+            
+        Returns:
+            dict: Message body for AzureTestResults
+        """
+        # Extract image metadata from original message
+        body = original_message.body
+
+        # Build the result message body following the schema
+        result_body = {
+            # Image identification
+            "architecture": body["architecture"],
+            "compose_id": body["compose_id"],
+            "image_id": body["image_definition_name"],  # Use definition name as image ID
+            "image_resource_id": body["image_resource_id"],
+
+            # Detailed test lists
+            "failed_tests": test_results.get("failed_tests", {"count": 0, "tests": {}}),
+            "skipped_tests": test_results.get("skipped_tests", {"count": 0, "tests": {}}),
+            "passed_tests": test_results.get("passed_tests", {"count": 0, "tests": {}})
+        }
+
+        return result_body
 
     def _parse_test_results(self, log_path, run_name):
         """
@@ -215,72 +281,115 @@ class AzurePublishedConsumer:
             root = tree.getroot()
             _log.info("Parsing xml root element: %s", root.tag)
 
-            counters = self._extract_test_counters(root)
-            if counters is None:
-                return None
+            # Extract individual test details
+            test_details = self._extract_test_details(root)
+            results = self._format_for_schema(test_details)
 
-            return self._calculate_final_results(counters)
+            return results
 
         except ET.ParseError as e:
             _log.error("Failed to parse XML file %s: %s", xml_file, str(e))
             return None
 
-    def _extract_test_counters(self, root):
+    def _extract_test_details(self, root):
         """
-        Extract test counters from XML root element.
+        Extract individual test case details from XML.
         
         Args:
             root: XML root element (either 'testsuites' or 'testsuite')
             
         Returns:
-            dict: Test counters or None if extraction fails
+            dict: Dictionary with lists of test names categorized by status:
+                  {'passed': [...], 'failed': [...], 'skipped': [...]}
         """
-        if root.tag not in ("testsuite", "testsuites"):
-            _log.error("Unexpected XML root element: %s", root.tag)
-            return None
+        test_details = {
+            'passed': [],
+            'failed': [],
+            'skipped': []
+        }
 
-        counters = {'total_tests': 0, 'failures': 0, 'errors': 0, 'skipped': 0}
+        test_suites = root.findall("testsuite") if root.tag == "testsuites" else [root]
 
-        # Extract counters from root element
-        for key, attr in [('total_tests', 'tests'), ('failures', 'failures'),
-                         ('errors', 'errors'), ('skipped', 'skipped')]:
-            attr_value = root.attrib.get(attr, '0')
-            counters[key] = int(attr_value) if attr_value.isdigit() else 0
+        # Iterate through test suites and test cases
+        for suite in test_suites:
+            suite_name = suite.attrib.get('name')
 
-        # If root doesn't have values and it's testsuites, sum from individual test suites
-        if counters['total_tests'] == 0 and root.tag != 'testsuite':
-            for suite in root.findall("testsuite"):
-                for key, attr in [('total_tests', 'tests'), ('failures', 'failures'),
-                                 ('errors', 'errors'), ('skipped', 'skipped')]:
-                    attr_value = suite.attrib.get(attr, '0')
-                    counters[key] += int(attr_value) if attr_value.isdigit() else 0
+            for testcase in suite.findall('testcase'):
+                test_name = testcase.attrib.get('name')
 
-        return counters
+                # Create a descriptive test identifier
+                test_identifier = f"{suite_name}.{test_name}"
+                test_time = testcase.attrib.get('time', '0.000')
 
-    def _calculate_final_results(self, counters):
+                # Check test status and extract the message if available
+                failure_elem = testcase.find('failure')
+                error_elem = testcase.find('error')
+                skipped_elem = testcase.find('skipped')
+
+                # Log test details for failed, skipped and errored tests
+                if failure_elem is not None:
+                    failure_msg = failure_elem.attrib.get('message', 'Test case failed')
+                    failure_msg = self._remove_html_tags(failure_msg)
+                    traceback_msg = failure_elem.text or ''
+
+                    # Combine failure_message and traceback if available
+                    if traceback_msg.strip():
+                        failure_msg = f"Summary: {failure_msg}\n Traceback: \n{traceback_msg.strip()}"
+                    test_details['failed'].append((test_identifier, failure_msg))
+
+                elif error_elem is not None:
+                    error_msg = error_elem.attrib.get('message', 'Test error')
+                    error_msg = self._remove_html_tags(error_msg)
+                    traceback_msg = error_elem.text or ''
+                    if traceback_msg.strip():
+                        error_msg = f"Summary: {error_msg}\n Traceback: \n{traceback_msg.strip()}"
+                    test_details['failed'].append((test_identifier, error_msg))
+
+                elif skipped_elem is not None:
+                    skip_msg = skipped_elem.attrib.get('message', 'Test skipped')
+                    skip_msg = self._remove_html_tags(skip_msg)
+
+                    # As there won't be any traceback will return the entire message
+                    test_details['skipped'].append((test_identifier, skip_msg))
+
+                else:
+                    passed_msg = f"Test passed in {test_time} seconds."
+                    test_details['passed'].append((test_identifier, passed_msg))
+
+        _log.info("Extracted test details - Passed: %d, Failed: %d, Skipped: %d",
+                  len(test_details['passed']),
+                  len(test_details['failed']),
+                  len(test_details['skipped']))
+
+        return test_details
+
+    def _remove_html_tags(self, msg):
+        "Remove HTML tags from the message."
+        return msg.replace("&lt;", "<").replace("&gt;", ">").replace("&amp;", "&")
+
+    def _format_for_schema(self, test_details=None):
         """
-        Calculate final test results from counters.
-        
+        Format the test details into the schema required for publishing.
         Args:
-            counters (dict): Dictionary with test count data
+            test_details (dict): Dictionary with test name lists
             
         Returns:
-            dict: Final test results with calculated passed tests
+            dict: Formatted test results for schema compliance
         """
-        failed_total = counters['failures'] + counters['errors']
-        passed_tests = max(0, counters['total_tests'] - failed_total - counters['skipped'])
+        results = {}
+        if test_details:
+            for each_category in ['passed', 'failed', 'skipped']:
+                test_list = test_details.get(each_category, [])
+                tests_dict = {}
+                for test_name, message in test_list:
+                    tests_dict[test_name] = message
 
-        _log.info("Parsed test results - Total: %d, Passed: %d, Failed: %d, Errors: %d, Skipped: %d",
-                  counters['total_tests'], passed_tests, counters['failures'],
-                  counters['errors'], counters['skipped'])
+                results[f"{each_category}_tests"] = {
+                    'count': len(test_list),
+                    'tests': tests_dict
+                }
 
-        return {
-            'total_tests': counters['total_tests'],
-            'passed': passed_tests,
-            'failed': counters['failures'],
-            'skipped': counters['skipped'],
-            'errors': counters['errors']
-        }
+        return results
 
     def _find_xml_file(self, log_path, run_name):
         """
@@ -311,3 +420,36 @@ class AzurePublishedConsumer:
 
         _log.warning("No XML file with suffix 'lisa.junit.xml' found in %s", xml_path)
         return None
+
+    def _generate_ssh_key_pair(self, temp_dir):
+        """
+        Generate an SSH key pair for authentication.
+
+        Args:
+            temp_dir (str): Directory to store the generated key pair.
+
+        Returns:
+            str: Path to the private key file. or None if generation fails.
+        """
+
+        private_key_path = os.path.join(temp_dir, "id_ed25519")
+        public_key_path = os.path.join(temp_dir, "id_ed25519.pub")
+
+        try:
+            # Generate SSH key pair using ssh-keygen
+            cmd = ["ssh-keygen", "-t", "ed25519", "-f", private_key_path, "-N", ""]
+            ret = subprocess.run(cmd, check=True, capture_output=True, text=True, timeout=60)
+            _log.info("SSH key pair generated at: %s and %s", private_key_path, public_key_path)
+            _log.debug("ssh-keygen output: %s", ret.stdout)
+
+            # Verify the private key file is created
+            if not os.path.exists(private_key_path):
+                _log.error("SSH key generation succeeded but private key file was not found at: %s", private_key_path)
+                return None
+
+            # Set the permissions for the file
+            os.chmod(private_key_path, 0o600)
+            return private_key_path
+        except (subprocess.CalledProcessError, OSError) as e:
+            _log.error("Failed to generate SSH key pair: %s", str(e))
+            return None

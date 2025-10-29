@@ -15,6 +15,7 @@ dependencies = [
     "fedora-messaging",
     "fedora-image-uploader-messages",
     "lisa[azure]",
+    "fedora-cloud-tests-messages"
 ]
 
 test = [

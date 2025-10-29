@@ -1,0 +1,35 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "fedora_cloud_tests_messages"
+description = "A schema package for messages sent by fedora_cloud_tests"
+readme ="README.md"
+license = "MIT"
+license-files = { paths = ["LICENSE"] }
+requires-python = ">=3.10"
+dynamic = ["version"]
+
+dependencies = [
+    "fedora_messaging",
+]
+[project.optional-dependencies]
+test = [
+    "pytest",
+]
+
+[tool.hatch.version]
+path = "fedora_cloud_tests_messages/__init__.py"
+
+[tool.black]
+line-length = 100
+
+[tool.coverage.run]
+source = [
+    "fedora_cloud_tests_messages",
+]
+
+[project.entry-points."fedora.messages"]
+"fedora_cloud_tests_messages.base_test_results" = "fedora_cloud_tests_messages.publish:BaseTestResults"
+"fedora_cloud_tests_messages.azure_test_results" = "fedora_cloud_tests_messages.publish:AzureTestResults"
